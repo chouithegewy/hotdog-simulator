@@ -1324,25 +1324,48 @@ mod tests {
     #[test]
     fn a_body_that_falls_on_its_weapon_pushes_it_aside() {
         let scene = scenery(&Map::bundled());
-        let (mut fall, _) = fall(Cause::Slump, 4);
-        // A pistol lying just where the hotdog will keel over.
-        let mut gun = weapon(1, OPEN + Vec3::new(0.01, 0.01, -0.06), Quat::from_rotation_y(1.));
-        let inside = |gun: &Ragdoll, fall: &Fall| {
-            gun.balls.iter().any(|ball| {
+        // How far the pistol is into the body's torso: over nothing, clear of it.
+        let depth = |gun: &Ragdoll, fall: &Fall| {
+            let mut deepest = f32::MIN;
+            for ball in &gun.balls {
                 let at = gun.bodies[0].point(ball.at);
-                fall.doll.balls.iter().filter(|other| other.body == TORSO).any(|other| at.distance(torso(fall).point(other.at)) < ball.radius + other.radius - 0.002)
-            })
+                for other in fall.doll.balls.iter().filter(|other| other.body == TORSO) {
+                    deepest = deepest.max(ball.radius + other.radius - at.distance(torso(fall).point(other.at)));
+                }
+            }
+            deepest
         };
-        let mut overlapped = false;
-        for _ in 0..360 {
-            fall.advance(1. / 60., OPEN, &scene);
-            overlapped |= inside(&gun, &fall);
-            part(&mut gun, &fall.doll, 1. / 60.);
-            gun.advance(1. / 60., &scene, &weapon_tuning());
+        // Which way a hotdog keels over, and how suddenly, is not the same on every machine: the last digit of a sine
+        // differs from one maths library to the next, and a fall magnifies it. So the pistol is laid under where the
+        // body of *this* run comes to rest (the weapon does not push the body, so the fall is the same with it there),
+        // for falls of both kinds, and what is asked is what matters: the body came down on it, shoved it well clear,
+        // and both lie still. (How deep it got before being shoved is a millimetre or two, either side of any line.)
+        for seed in 0..4 {
+            let rest = {
+                let (mut fall, _) = fall(Cause::Slump, seed);
+                for _ in 0..360 {
+                    fall.advance(1. / 60., OPEN, &scene);
+                }
+                torso(&fall).at
+            };
+            let (mut fall, _) = fall(Cause::Slump, seed);
+            let laid = Vec3::new(rest.x, FLOOR + 0.01, rest.z);
+            let mut gun = weapon(1, laid, Quat::from_rotation_y(1.));
+            let mut deepest = f32::MIN;
+            for _ in 0..360 {
+                fall.advance(1. / 60., OPEN, &scene);
+                deepest = deepest.max(depth(&gun, &fall));
+                part(&mut gun, &fall.doll, 1. / 60.);
+                gun.advance(1. / 60., &scene, &weapon_tuning());
+            }
+            let (at, left) = (gun.bodies[0].at, depth(&gun, &fall));
+            let moved = Vec2::new(at.x - laid.x, at.z - laid.z).length();
+            let told = format!("fall {seed}: the body rests at {rest}, the pistol went {moved} m to {at}, was {deepest} m in at the deepest and is {left} m in now");
+            assert!(deepest > 0., "the body did fall on it ({told})");
+            assert!(moved > 0.02, "and shoved it aside ({told})");
+            assert!(left < 0.002, "so it ends beside the body, not in it ({told})");
+            assert!(gun.asleep() && fall.doll.asleep() && at.y < FLOOR + 0.03 && at.y > FLOOR, "{told}");
         }
-        assert!(overlapped, "the body did fall on it");
-        assert!(!inside(&gun, &fall), "and it ends beside the body, not in it");
-        assert!(gun.asleep() && fall.doll.asleep() && gun.bodies[0].at.y < FLOOR + 0.03 && gun.bodies[0].at.y > FLOOR);
     }
     #[test]
     fn every_weapon_ball_is_inside_the_weapon() {
