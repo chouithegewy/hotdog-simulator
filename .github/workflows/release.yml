@@ -7,7 +7,7 @@
 #
 #   linux     ubuntu-22.04    hotdog-simulator-VERSION-linux-x86_64.tar.gz (linked against glibc 2.31 with zig)
 #   windows   windows-2022    hotdog-simulator-VERSION-windows-x86_64.zip (x86_64-pc-windows-msvc, built natively)
-#   mac       macos-14        hotdog-simulator-VERSION-macos-universal.dmg and .zip (arm64 and x86_64, ad-hoc signed)
+#   mac       macos-15        hotdog-simulator-VERSION-macos-universal.dmg and .zip (arm64 and x86_64, ad-hoc signed)
 #   web       ubuntu-22.04    hotdog-simulator-VERSION-web.zip (the WebGL 2 and WebGPU builds)
 #
 # Every package has the breakfast intro: its people are made in code (src/human/), with no asset to leave out. Artifacts
@@ -89,7 +89,7 @@ jobs:
           if-no-files-found: error
 
   mac:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
