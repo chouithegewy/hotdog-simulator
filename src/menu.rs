@@ -28,6 +28,10 @@
 //! * **Leaving**: natively QUIT GAME; in a browser online LEAVE MATCH, which reloads the page into the lobby (the
 //!   fridge, until the next round), and offline RESTART, a new game of the same mode (the page's links choose others).
 //!   Each asks once more first.
+//! * **The page's links** (Play, the five-player demo, Licences and source: index.html's `.modes`) are the start page's:
+//!   while the game (a round, the demo, a replay, a cut scene) is on the screen they would sit over its display, so the
+//!   page hides them, and shows them again while this menu is open ([`tell_page`]: `<html data-screen>`). The menu has
+//!   the licences of its own as well (THIRD-PARTY LICENCES).
 //!
 //! The look follows the head-up display (hud.rs): a dark translucent panel, white text, the mustard accent, the same
 //! icons (icons.rs), sized from the window's height (720 pixels is 1x) and rebuilt when it changes. ASCII only.
@@ -50,7 +54,7 @@ impl bevy::app::Plugin for Plugin {
                 PreUpdate,
                 run.after(bevy::input::InputSystems).after(bevy::ui::UiSystems::Focus).after(crate::touch::press).before(crate::controls::Shut),
             )
-            .add_systems(Update, draw.after(crate::arena::tick));
+            .add_systems(Update, (draw.after(crate::arena::tick), tell_page));
     }
 }
 
@@ -618,6 +622,20 @@ impl Renderer {
     }
 }
 
+/// What the page is told is on the screen ([`web::screen`]): the game, or this menu over it.
+pub fn screen(menu: &Menu) -> &'static str {
+    if menu.open { "menu" } else { "game" }
+}
+/// Every frame the game runs: the page told what is on the screen when it changes, so that it hides its links over the
+/// game and shows them with the menu (index.html).
+fn tell_page(menu: Res<Menu>, mut said: Local<&'static str>) {
+    let now = screen(&menu);
+    if *said != now {
+        *said = now;
+        web::screen(now);
+    }
+}
+
 /// The page's side, in a browser; natively what it would say.
 mod web {
     #[cfg(target_arch = "wasm32")]
@@ -629,6 +647,7 @@ export function menu_renderer(){try{const m=window.hotdogGraphicsMenus?.state?.(
 export function menu_store_renderer(v){try{localStorage.setItem('hotdog-renderer',v)}catch{}}
 export function menu_reload(){location.reload()}
 export function menu_licences(){try{window.open('THIRD_PARTY_LICENSES.html','_blank','noopener')}catch{}}
+export function menu_screen(s){try{const d=document.documentElement.dataset;if(s)d.screen=s;else delete d.screen}catch{}}
 ")]
         extern "C" {
             pub fn menu_locked() -> bool;
@@ -637,7 +656,15 @@ export function menu_licences(){try{window.open('THIRD_PARTY_LICENSES.html','_bl
             pub fn menu_store_renderer(value: &str);
             pub fn menu_reload();
             pub fn menu_licences();
+            pub fn menu_screen(state: &str);
         }
+    }
+    /// Tells the page what is on the screen: "game", "menu" (this menu over it), or "" (nothing of the game's).
+    pub fn screen(state: &str) {
+        #[cfg(target_arch = "wasm32")]
+        js::menu_screen(state);
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = state;
     }
     /// Whether the page really has the pointer lock (natively the grab is the truth).
     pub fn locked(grab: bool) -> bool {
@@ -1540,6 +1567,17 @@ mod tests {
     use super::*;
     use crate::arena::{test_app, test_frame, Game, Weapon};
     use bevy::input::mouse::AccumulatedMouseMotion;
+
+    /// The page is told the game is on the screen (it hides its links over it) and the menu once it opens (they come back).
+    #[test]
+    fn the_page_hides_its_links_over_the_game_and_shows_them_with_the_menu() {
+        let mut menu = Menu::default();
+        assert_eq!(screen(&menu), "game");
+        menu.open = true;
+        assert_eq!(screen(&menu), "menu");
+        let page = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/index.html")).unwrap();
+        assert!(page.contains("html[data-screen=game] .modes{display:none}"));
+    }
 
     /// A round with the menu's systems as `main` has them (the gate, the menu), and the round's own.
     fn round(rules: &str) -> App {

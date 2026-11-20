@@ -29,6 +29,12 @@
     "grid": "9891ebb5",
     "ground": "649f0e92"
   },
+  "titans-kitchen.json": {
+    "cols": 180,
+    "rows": 150,
+    "grid": "549a89d7",
+    "ground": "96719e98"
+  },
   "pillow-fort.json fielded": {
     "cols": 150,
     "rows": 45,
@@ -46,6 +52,7 @@
     "uncanonical.json": "3334795f",
     "pillow-fort.json": "cb4c5626",
     "the-whole-kitchen-forts.json": "578e34ef",
-    "kung-fu-dojo.json": "dbdb950b"
+    "kung-fu-dojo.json": "dbdb950b",
+    "titans-kitchen.json": "5845a62e"
   }
 }

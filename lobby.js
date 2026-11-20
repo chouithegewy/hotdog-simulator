@@ -32,14 +32,32 @@ export const header=roster=>{const members=roster?.members??[],count=`${two(memb
  if(roster.stage!=='Lobby')return `${count} · round in progress`;
  if(roster.countdown!=null)return `${count} · starting in ${roster.countdown}`;
  return `${count} · ${members.filter(m=>m.ready).length} ready`};
-/** The game the lobby's leader chooses: its five modes, as the page names them (the server's lobby.rs PLAYS and mode_name). */
-export const MODES=['siege','forts','ffa','cards','kungfu'],MODE_NAME={siege:'Siege',forts:'Forts',ffa:'Free For All',cards:'Fully Loaded',kungfu:'Kung Fu'},RANDOM='random';
+/** The game the lobby's leader chooses: its six modes, as the page names them (the server's lobby.rs PLAYS and mode_name). */
+export const MODES=['siege','forts','ffa','cards','kungfu','titan'],MODE_NAME={siege:'Siege',forts:'Forts',ffa:'Free For All',cards:'Fully Loaded',kungfu:'Kung Fu',titan:'Titan'},RANDOM='random';
 /** The one map Fully Loaded is played on (the server's lobby.rs `default_map` for it): the card table stands on Counter Siege's microwave. */
 export const CARDS_MAP='counter-siege';
 /** Kung Fu's own map (its `mode` is kungfu, and it is played as nothing else): a bamboo steamer's lid for a ring. */
 export const KUNGFU_MAP='kung-fu-dojo';
+/** Titan's own map (its `mode` is titan: the only one with the titan layout; the siege and Free For All may be played there too): the kitchen floor at night. */
+export const TITAN_MAP='titans-kitchen';
+/** The map a mode is played on alone when the address names none (index.html): Forts needs a map with a Forts layout,
+ * Kung Fu its dojo and Titan a room made for a giant, and the game's own map (Counter Siege) is none of them. '' for a mode that plays there. */
+const OWN_MAPS={forts:'pillow-fort',kungfu:KUNGFU_MAP,titan:TITAN_MAP};
+export function ownMap(mode){return typeof mode==='string'&&Object.hasOwn(OWN_MAPS,mode)?OWN_MAPS[mode]:''}
+/** Titan: who the lobby's leader may make the titan (the server's `{type:'choose', titan}`), and what the page calls each; a member is chosen by id. */
+export const TITAN_PICKS=['auto','bot','random','me'],TITAN_PICK_NAME={auto:'Auto: a bot under three players, else a random player',bot:'A bot',random:'A random player',me:'Me'};
+/** Titan: the leader's choices of who is the titan (each player but the leader by name), and the value chosen now (the roster's `titan`: its pick, and the
+ * member it names). */
+export const titanOptions=(roster,me)=>[...TITAN_PICKS.map(value=>({value,text:TITAN_PICK_NAME[value]})),...(roster?.members??[]).filter(m=>m.id!==me).map(m=>({value:String(m.id),text:String(m.name)}))];
+export const titanValue=(roster,me)=>{const t=roster?.titan;if(!t)return 'auto';if(t.pick==='member'||t.pick==='me')return t.member===me?'me':t.member!=null?String(t.member):'auto';return TITAN_PICKS.includes(t.pick)?t.pick:'auto'};
+/** Titan: who the titan is, in a line everyone sees before they ready up: a player by name ("you" for this page's), a bot, or not drawn yet. */
+export const titanText=(roster,me)=>{const t=roster?.titan;if(!t)return '';const member=roster.members?.find(m=>m.id===t.member);
+ if(t.name!=null&&t.player!=null){const self=roster.members?.find(m=>m.id===me);return self&&self.player===t.player?'You are the titan':`The titan: ${t.name}`}
+ if(t.pick==='bot')return 'The titan: a bot';if(member)return member.id===me?'You are the titan':`The titan: ${member.name}`;
+ if(t.pick==='random')return 'The titan: a random player, drawn as the round starts';return 'The titan: a bot under three players, else a random player'};
 /** What each mode is, in a line under the choice. */
 export const modeText=roster=>{const mode=roster?.mode,scores=roster?.scores;
+ if(mode==='titan')return 'Titan · one giant hotdog against everyone else · three comebacks each · bring it down before five minutes are up. Shoot the back of its head.';
  if(mode==='forts')return `Forts · three a side · first to three rounds${scores&&(scores[0]||scores[1])?` · ${scores[0]} : ${scores[1]}`:''}. Build a fort, then steal the bacon and bring it home.`;
  if(mode==='ffa')return 'Free For All · everyone fights everyone · respawn in five seconds · first to 25 kills, or the most in five minutes.';
  if(mode==='cards')return 'Cards at a little table on the microwave: flip toppings, stop before you double up. First to 100.';
@@ -54,9 +72,9 @@ export const holds=(e,mode)=>Array.isArray(e?.modes)?e.modes.includes(mode):mode
  * the rest, greyed (`disabled`) with the reason (`why`, the server's, and the gist of it in the line). A map made for another mode says so (Free For All
  * says it for every map). Of two maps with one title, one whose file is named after the title keeps it, and the other has what its file's name adds to it
  * (`counter-siege-v2`: Counter Siege (v2)), or else the file's name. Fully Loaded (Counter Siege alone, and no Random: the server would refuse any other map
- * while it is chosen) and Kung Fu (the dojo) list only their own. */
+ * while it is chosen), Kung Fu (the dojo) and Titan (Titan's Kitchen) list only their own. */
 export const options=(roster,mode)=>{const maps=roster?.maps??[],cards=mode==='cards',told=maps.some(e=>Array.isArray(e.modes)),slug=t=>String(t).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
- const playable=maps.filter(e=>holds(e,mode)),greyed=told&&!cards&&mode!=='kungfu'?maps.filter(e=>!holds(e,mode)):[],listed=[...playable,...greyed];
+ const playable=maps.filter(e=>holds(e,mode)),greyed=told&&!cards&&mode!=='kungfu'&&mode!=='titan'?maps.filter(e=>!holds(e,mode)):[],listed=[...playable,...greyed];
  const tell=e=>{if(listed.filter(x=>x.title===e.title).length<2)return '';const base=slug(e.title);if(e.name===base)return '';return ` (${e.name.startsWith(base+'-')?e.name.slice(base.length+1):e.name})`};
  const made=e=>!cards&&e.mode!==mode?` · ${MODE_NAME[e.mode]??e.mode}`:'',line=e=>`${e.title}${tell(e)}${made(e)} · ${e.theme}`;
  const why=e=>String(e.why?.[mode]??`${e.title} cannot be played as ${MODE_NAME[mode]??mode}.`),gist=e=>{const w=why(e).split(':')[0].replace(/\.$/,'');return w.startsWith(e.title)?w.slice(e.title.length).trim():w};
@@ -137,7 +155,9 @@ const TEMPLATE=`
   <p class="eyebrow game-title">Next game <span class="lobby-chooser" id="lobby-chooser"></span></p>
   <div class="lobby-row"><span>Mode</span><div class="lobby-modes" id="lobby-modes" role="radiogroup" aria-label="Game mode"></div></div>
   <div class="lobby-row"><span>Map</span><div class="lobby-pick"><select id="lobby-map" aria-label="Map"></select><span class="look" id="lobby-look"></span></div></div>
+  <div class="lobby-row" id="lobby-titan-row" hidden><span>Titan</span><div class="lobby-pick"><select id="lobby-titan" aria-label="Who is the titan"></select></div></div>
   <p class="lobby-mode" id="lobby-mode"></p>
+  <p class="lobby-mode lobby-titan" id="lobby-titan-who" hidden></p>
  </section>
  <p class="eyebrow">Your hotdog</p>
  <label class="lobby-row"><span>Name</span><input id="lobby-name" type="text" maxlength="48" autocomplete="off" spellcheck="false" aria-label="Your name"></label>
@@ -190,6 +210,9 @@ export function start(server){
  const modeButtons=MODES.map(mode=>{const b=document.createElement('button');b.type='button';b.className=`mode ${mode}`;b.textContent=MODE_NAME[mode];b.setAttribute('role','radio');b.dataset.mode=mode;
   b.addEventListener('click',()=>{send({type:'choose',mode});canvas.focus()});$('lobby-modes').append(b);return b});
  mapBox.addEventListener('change',()=>{send({type:'choose',map:mapBox.value});canvas.focus()});mapBox.addEventListener('keydown',event=>event.stopPropagation());
+ // Titan: the leader chooses who is the giant (a bot, a random player, the leader, or a player by name); everyone sees who it is before readying up.
+ const titanRow=$('lobby-titan-row'),titanBox=$('lobby-titan'),titanWho=$('lobby-titan-who');let lastTitan='';
+ titanBox.addEventListener('change',()=>{const v=titanBox.value;send({type:'choose',titan:TITAN_PICKS.includes(v)?v:Number(v)});canvas.focus()});titanBox.addEventListener('keydown',event=>event.stopPropagation());
  // The address may ask for a game (mode= and map=, outside a sandbox): chosen once, as soon as this page leads the lobby, before a countdown.
  let want=asked(location.search);
  const follow=()=>{if(!want||me==null||roster?.leader!==me||roster.stage!=='Lobby'||roster.countdown!=null)return;for(const message of choosing(want,roster.choice))send(message);want=null};
@@ -286,6 +309,9 @@ export function start(server){
   const listed=options(roster,choice?.mode),key=JSON.stringify(listed);if(key!==lastOptions&&document.activeElement!==mapBox){lastOptions=key;mapBox.replaceChildren(...listed.map(o=>{const option=document.createElement('option');option.value=o.value;option.textContent=o.text;if(o.disabled){option.disabled=true;option.title=o.why}return option}))}
   if(document.activeElement!==mapBox&&choice)mapBox.value=choice.random?RANDOM:choice.name;mapBox.disabled=!can;mapBox.title=can?'Choose the map':leading?'The game can only be changed in the lobby, before the countdown':'The leader chooses the map';
   look.textContent=choice?(choice.random?'drawn each round':choice.theme):'';look.dataset.theme=choice?.random?'random':choice?.theme??'';
+  const titan=roster?.mode==='titan';titanRow.hidden=!titan;titanWho.hidden=!titan;titanWho.textContent=titan?titanText(roster,me):'';
+  if(titan){const choices=titanOptions(roster,me),k=JSON.stringify(choices);if(k!==lastTitan&&document.activeElement!==titanBox){lastTitan=k;titanBox.replaceChildren(...choices.map(o=>{const option=document.createElement('option');option.value=o.value;option.textContent=o.text;return option}))}
+   if(document.activeElement!==titanBox)titanBox.value=titanValue(roster,me);titanBox.disabled=!can;titanBox.title=can?'Choose who is the titan':'The leader chooses who is the titan'}
   chooser.replaceChildren(...(leader?[crown(),document.createTextNode(leading?(open?'you choose':'you chose'):`${leader.name} chooses`)]:[document.createTextNode(roster?'the first one seated chooses':'')]));
   next.hidden=!roster||now==='round';next.replaceChildren();if(choice){const what=document.createElement('b');what.textContent=nextGame(roster,now!=='lobby'||roster.stage!=='Lobby');next.append(what);
    if(leader&&now==='lobby'){const by=document.createElement('span');by.className='by';by.append(' · ',crown(),document.createTextNode(leader.name));next.append(by)}}
@@ -295,7 +321,7 @@ export function start(server){
   ptt.disabled=!secure;
   note.textContent=!secure?'Voice needs the page opened over https or from localhost.'+(rtc?' You can still hear the others and use the chat.':' The chat still works.'):micError||(!rtc?'This browser has no voice chat. The chat still works.':'');
   // The ready queue, in the order people arrived, and its short form beside the chat during a round.
-  const shape=JSON.stringify([roster?.members,roster?.stage,roster?.bots,roster?.leader,me,[...peers].map(([id,p])=>[id,p.pc.connectionState])]);if(shape===lastQueue)return;lastQueue=shape;
+  const shape=JSON.stringify([roster?.members,roster?.stage,roster?.bots,roster?.leader,roster?.mode==='titan'?roster.titan:null,me,[...peers].map(([id,p])=>[id,p.pc.connectionState])]);if(shape===lastQueue)return;lastQueue=shape;
   queue.replaceChildren();voices.replaceChildren();
   for(const entry of forts?sides(roster):(roster?.members??[]).map(member=>({member}))){
    if(entry.head){const head=document.createElement('li'),dot=document.createElement('span'),name=document.createElement('b'),bots=document.createElement('span');head.className='team-head';dot.className='team-dot';dot.style.background=entry.side==null?'transparent':TEAM_COLOUR[entry.side];
@@ -304,7 +330,9 @@ export function start(server){
    const playing=roster.stage!=='Lobby'&&roster.stage!=='Opening'&&member.player!=null&&!member.waiting;row.className=`member${member.ready&&!playing?' ready':''}${member.id===me?' me':''}`;row.dataset.id=member.id;tint.className='swatch';tint.style.background=swatch(member.color);tint.title=member.color??'';
    name.textContent=member.name;meter.className=`meter ${member.mic}`;meter.dataset.id=member.id;meter.title=member.mic==='live'?'microphone on':member.mic==='muted'?'muted':'no microphone';
    status.className='status';status.textContent=member.player==null?'loading':member.waiting?'next round':playing?'playing':member.ready?'READY':'not ready';row.append(tint,name);
-   if(member.id===roster.leader){row.classList.add('leader');row.append(crown())}row.append(meter);
+   if(member.id===roster.leader){row.classList.add('leader');row.append(crown())}
+   if(roster.mode==='titan'&&roster.titan&&(roster.titan.player!=null?member.player===roster.titan.player:member.id===roster.titan.member)){const tag=document.createElement('span');tag.className='status titan';tag.textContent='TITAN';row.classList.add('titan');row.append(tag)}
+   row.append(meter);
    if(member.id!==me&&member.voice&&rtc){const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='100';volume.value=String(Math.round((volumes.get(member.id)??1)*100));volume.className='volume';volume.title=`Volume of ${member.name}`;volume.setAttribute('aria-label',`Volume of ${member.name}`);
     volume.addEventListener('input',()=>{const v=Number(volume.value)/100;volumes.set(member.id,v);const peer=peers.get(member.id);if(peer)peer.audio.volume=v});volume.addEventListener('change',()=>canvas.focus());row.append(volume)}
    row.append(status);queue.append(row);

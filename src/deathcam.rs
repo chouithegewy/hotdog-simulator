@@ -35,7 +35,10 @@
 //! the arena is in its way it comes in closer and higher ([`fits`]); where that is not enough the
 //! circling turns back and goes round the other way, and the mouse stops at it ([`DeathCam::shoot`]).
 //! Boxed in, it finds the nearest side there is room on, coming nearer if it was taken further off
-//! than usual ([`settle`]).
+//! than usual ([`settle`]). Under something (a den's roof: a table top, the sideboard, a chair's seat) with no room
+//! as it is set up, it comes down as low as the mouse takes it, and nearer, and so looks out of the den's mouth
+//! rather than down through its roof; and with no room even so it comes in as near as there is ([`pull_in`], which a
+//! replay's follow camera uses too).
 use crate::maya::HotdogCamera;
 use crate::player_model::{Cues, Gait, PlayerBody, PlayerModels, Rig};
 use crate::ragdoll::Scene;
@@ -185,7 +188,8 @@ pub fn fits(body: Vec3, angle: f32, orbit: Orbit, bounds: &ArenaBounds, scene: &
 /// The side nearest to `angle` that the camera can stand on, set up as `orbit`: the side, how far back
 /// and how far off. Taken further off than usual and finding no room there, it comes nearer a step at a
 /// time, as near as the usual distance. Boxed in on every side, it looks almost straight down from the
-/// side the middle of the arena is on.
+/// side the middle of the arena is on; and where that is inside something (the body is under a roof), it comes as low
+/// as the mouse takes it, and nearer, to look out of the den's mouth, or failing that as near as there is room.
 pub fn settle(body: Vec3, angle: f32, orbit: Orbit, bounds: &ArenaBounds, scene: &Scene) -> (f32, f32, f32) {
     let usual = Orbit::default().reach;
     let mut reach = orbit.reach;
@@ -205,7 +209,48 @@ pub fn settle(body: Vec3, angle: f32, orbit: Orbit, bounds: &ArenaBounds, scene:
         reach = (reach * 0.8).max(usual);
     }
     let middle = bounds.centre() - body;
-    (middle.x.atan2(middle.z), BACK * 0.3 * reach / usual, reach)
+    let turned = middle.x.atan2(middle.z);
+    let (back, reach) = (BACK * 0.3 * reach / usual, reach);
+    // Boxed in on every side: almost straight down, from the side the middle of the arena is on.
+    if scene.clear(place(body, turned, back, reach, bounds), 0.03, 0.) {
+        return (turned, back, reach);
+    }
+    // That is inside something: the body is under a roof (a den's) with no room as the camera is set up. As low as the
+    // mouse takes it, then nearer, looking out of the den's mouth.
+    for low in [Orbit { rise: LOW, reach: orbit.reach.min(usual) }, Orbit { rise: LOW, reach: NEAR }] {
+        for step in 0..=10 {
+            for side in [1., -1.] {
+                let turned = angle + side * step as f32 * 0.3;
+                if let Some(back) = fits(body, turned, low, bounds, scene) {
+                    return (turned, back, low.reach);
+                }
+            }
+        }
+    }
+    // No room even so: low and as near as there is room, from the side the middle of the arena is on.
+    let wanted = place(body, turned, NEAR * LOW.cos(), NEAR, bounds);
+    let eye = pull_in(scene, body, wanted, 0.02);
+    let near = Vec2::new(eye.x - body.x, eye.z - body.z).length().max(0.02);
+    (turned, near, near.hypot((eye.y - body.y).max(0.)))
+}
+
+/// Where a camera that wants to stand at `eye`, looking at `at`, can: as far out along the line from `at` as nothing of
+/// the map (`scene`) is in the way, `clear` short of it; `at` itself if something is right there.
+pub fn pull_in(scene: &Scene, at: Vec3, eye: Vec3, clear: f32) -> Vec3 {
+    let (way, far) = ((eye - at).normalize_or_zero(), at.distance(eye));
+    if far < 1e-4 {
+        return eye;
+    }
+    let steps = (far / 0.01).ceil() as usize;
+    let mut room = 0.;
+    for k in 1..=steps {
+        let d = (k as f32 * 0.01).min(far);
+        if !scene.clear(at + way * d, clear, 0.) {
+            return at + way * (room - clear).max(0.);
+        }
+        room = d;
+    }
+    eye
 }
 
 /// What the player's hand did to the death camera in one frame ([`hand`]).
@@ -580,7 +625,8 @@ pub(crate) fn watch(world: &mut World) {
         // In first person there is nothing of oneself to see; dead, the body is what is watched; in Kung Fu over the
         // shoulder (fight.rs) it is seen fighting.
         let third = crate::fight::third_person(world);
-        world.entity_mut(entity).insert(if (player.alive && !third) || player.consumed {
+        let titan = world.get_resource::<crate::arena::Game>().is_some_and(|g| crate::titan::drawn_as_titan(g, player.id));
+        world.entity_mut(entity).insert(if (player.alive && !third) || player.consumed || titan {
             Visibility::Hidden
         } else {
             Visibility::Visible
@@ -603,6 +649,7 @@ fn film(
     joints: Query<&Transform, Without<HotdogCamera>>,
     mut shown: Query<&mut Visibility, With<PlayerBody>>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<HotdogCamera>>,
+    titans: Option<Res<crate::titan::Titans>>,
 ) {
     let Some(game) = game else {
         return;
@@ -630,7 +677,12 @@ fn film(
     let bounds = bounds.map_or_else(ArenaBounds::default, |bounds| *bounds);
     let empty = Scene::default();
     let scene = deaths.as_ref().map_or(&empty, |deaths| &deaths.scene);
-    let shot = cam.shoot(time.delta_secs().min(0.05), subject, &bounds, scene);
+    let who = subject.who;
+    let mut shot = cam.shoot(time.delta_secs().min(0.05), subject, &bounds, scene);
+    // Watching the titan: from far enough off to see the giant whole (titan/camera.rs).
+    if let Some(giant) = titans.as_deref().and_then(|t| t.drawn).filter(|(id, ..)| who == Some(*id)) {
+        shot = crate::titan::camera::framed(shot, &giant.1.skeleton, &giant.2, &bounds);
+    }
     // For the first frame the camera is still inside the body it is leaving.
     let own = bodies.iter().find(|(_, gait, ..)| gait.id() == id);
     if let Some(mut visibility) = own.filter(|_| cam.inside(&shot)).and_then(|(entity, ..)| shown.get_mut(entity).ok()) {
@@ -1235,7 +1287,9 @@ mod tests {
                 let (angle, back, reach) = settle(body, at.x * 2., orbit, &bounds, &scene);
                 let eye = place(body, angle, back, reach, &bounds);
                 assert!(within(eye, &bounds) && eye.y >= bounds.floor + HEAD - 1e-5, "{eye} for {orbit:?} over {at}");
-                assert!(reach <= orbit.reach + 1e-6 && reach >= orbit.reach.min(usual.reach) - 1e-6);
+                // (Under something with no room as it is set up, it comes lower and nearer: `settle`.)
+                let roofed = (1..=10).any(|i| !scene.clear(body + Vec3::Y * orbit.reach * i as f32 / 10., 0.03, 0.));
+                assert!(reach <= orbit.reach + 1e-6 && (reach >= orbit.reach.min(usual.reach) - 1e-6 || roofed), "{reach} for {orbit:?} over {at}");
             }
         }
         // Taken round and up and down, nearer and further off, all over the counter, by a hand that does not let

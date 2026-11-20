@@ -242,7 +242,7 @@ impl Feast {
     }
     /// Whether a body put at the spot now would be in nothing: no wall of the level as it is (a draped napkin's
     /// included) under its feet, and no loose object between its feet and above its head, at its middle or its side.
-    fn free(&self, at: Vec3) -> bool {
+    pub(crate) fn free(&self, at: Vec3) -> bool {
         let (x, y, z) = (at.x as f64, at.y as f64, at.z as f64);
         let top = y + actor::HEIGHT + 0.02;
         std::iter::once([x, z]).chain(ring(x, z, HOTDOG_RADIUS)).all(|[px, pz]| {

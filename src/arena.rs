@@ -463,6 +463,11 @@ pub struct Game {
     hit: f32,
     message: String,
     message_time: f32,
+    /// A note the player is shown whatever the hints (a mode the map refuses: [`fit_rules`]), for `notice_time` seconds,
+    /// and the last such note said (each is said once).
+    notice: String,
+    notice_time: f32,
+    refused: Option<String>,
     enemies: Vec<Enemy>,
     pickups: Vec<Pickup>,
     effects: Vec<Effect>,
@@ -500,6 +505,9 @@ pub struct Game {
     /// Kung Fu: the client's copy of the fight (interface.md 4b): offline the round's own (`Feast::kungfu_view`) every
     /// tick, online the server's `{type:'kungfu'}` (network.rs). `None` in any other mode, which is how the client tells.
     pub kungfu: Option<kitchen_sim::kungfu::View>,
+    /// Titan: the client's copy of the titan (titan/interface.md §4): offline the round's own (`Feast::titan_view`) every
+    /// tick, online the server's `{type:'titan'}` (network.rs, `titan::hear`). `None` in any other mode.
+    pub titan: Option<kitchen_sim::titan::View>,
     /// Kung Fu: the style this player asks for (`kungfu::Style` as its number; sent as the command's weapon, style + 1,
     /// until the simulation has changed to it), and the levels held this frame that every command carries (the heavy
     /// strike's SCOPE, the block's GRAB, the special's PRONE).
@@ -706,6 +714,13 @@ impl Game {
         // say). A card table is shuffled afresh every game (online the server shuffles).
         if !self.network {
             self.feast.card_seed = crate::cards::fresh_seed();
+            // A mode this map refuses is not played on it: the map's own mode is, and the player is told, once.
+            let (rules, refused) = fit_rules(&self.rules, &self.feast.level.map);
+            if let Some(why) = refused.filter(|why| self.refused.as_ref() != Some(why)) {
+                warn!("{why}");
+                (self.notice, self.notice_time, self.refused) = (why.clone(), NOTICE, Some(why));
+            }
+            self.rules = rules;
             self.feast.set_rules(self.rules.clone());
         }
         self.feast.tune = self.tuning.clone();
@@ -713,6 +728,7 @@ impl Game {
         // Kung Fu is known from the start of the round (online the server's word puts it there, network.rs).
         if !self.network {
             self.kungfu = self.feast.kungfu_view();
+            self.titan = self.feast.titan_view();
         }
         self.fu_style = None;
         self.seen_round = self.feast.round;
@@ -755,6 +771,10 @@ impl Game {
         for pickup in &mut self.pickups {
             pickup.state.ready = 0.;
         }
+    }
+    /// The note on the screen now, whatever the hints (see `notice`).
+    pub fn notice(&self) -> Option<&str> {
+        (self.notice_time > 0.).then_some(self.notice.as_str())
     }
     fn notify(&mut self, s: impl Into<String>) {
         self.message = s.into();
@@ -1071,6 +1091,9 @@ pub fn setup(
         hit: 0.,
         message: String::new(),
         message_time: 0.,
+        notice: String::new(),
+        notice_time: 0.,
+        refused: None,
         enemies: vec![],
         pickups: vec![],
         effects: vec![],
@@ -1098,6 +1121,7 @@ pub fn setup(
         seen_round: 0,
         fort: None,
         kungfu: None,
+        titan: None,
         fu_style: None,
         fu_hold: 0,
         build: 0.,
@@ -1143,6 +1167,7 @@ pub fn load_map(world: &mut World, map: Map) {
         g.roster = g.feast.players.clone();
         g.fort = g.feast.fort_state();
         g.kungfu = if g.network { None } else { g.feast.kungfu_view() };
+        g.titan = if g.network { None } else { g.feast.titan_view() };
         g.pickups = spawn_pickups(world, &v, &g.feast);
         if !g.playing() {
             (g.position, g.yaw) = g.start();
@@ -1727,6 +1752,7 @@ pub fn tick(world: &mut World) {
         g.clap += frame_dt;
         g.hit = (g.hit - frame_dt).max(0.);
         g.message_time = (g.message_time - frame_dt).max(0.);
+        g.notice_time = (g.notice_time - frame_dt).max(0.);
         if g.phase == Phase::Knife && g.phase_time > 4.5 {
             phase(world, &mut g, Phase::Peeling);
         }
@@ -1966,11 +1992,14 @@ pub fn tick(world: &mut World) {
         // Kung Fu: hands and feet (`kung_fu_input`, below). The guns, the scope, the stim, prone, picking up, carrying and
         // eating are not heard: their keys strike, kick, block, grab, dodge and change style instead.
         let fu = g.kung_fu();
+        // Titan, as the titan (titan_input, below): its moves on the keys of the trigger, the aim, the melee and the stim
+        // (controls.rs, the TITAN tab). It has no gun, takes no stim, lies prone, picks up, carries or eats nothing.
+        let giant = !options.demo && crate::titan::titan_id(&g) == Some(g.me());
         if options.demo || !alive || g.phase == Phase::Rest || table {
             movement = Vec2::ZERO;
             g.prone = false;
             g.crouch = false;
-        } else if fu {
+        } else if fu || giant {
             g.prone = false;
             g.crouch = held(Action::Crouch);
         } else {
@@ -1986,7 +2015,7 @@ pub fn tick(world: &mut World) {
                 }
             }
         }
-        if !g.network && !fu {
+        if !g.network && !fu && !giant {
             let (prone, crouch) = (g.prone, g.crouch);
             g.feast.set_prone(1, prone);
             g.feast.set_crouch(1, crouch);
@@ -2016,7 +2045,7 @@ pub fn tick(world: &mut World) {
         // the other bodies, and the step that follows works out its jump, its falls and any throw. (Online the
         // frame's input is made into the server's commands below, once everything pressed is known.)
         let stride = Vec2::new(velocity.x, velocity.z) * dt;
-        if !g.network && !options.demo && alive && !table && !fu {
+        if !g.network && !options.demo && alive && !table && !fu && !giant {
             let (yaw, pitch) = (g.yaw, g.pitch);
             // A thrown hotdog steers poorly until it has come to rest.
             let control = if g.feast.body(1).is_some_and(|body| body.launched) { g.feast.bodies.config.control as f32 } else { 1. };
@@ -2033,7 +2062,7 @@ pub fn tick(world: &mut World) {
         // full (`Weapon::Laden`), which no key selects.
         // (At the card table no gun is taken in hand: cards.rs.)
         let [primary, secondary] = slots(&g.owned);
-        let armed = alive && !laden && !table && !fu;
+        let armed = alive && !laden && !table && !fu && !giant;
         for (action, slot) in [(Action::Primary, primary), (Action::Secondary, secondary)] {
             if let Some(weapon) = slot.filter(|_| armed && pressed(action)) {
                 g.weapon = weapon;
@@ -2129,7 +2158,7 @@ pub fn tick(world: &mut World) {
         // cannot hold it down and aim as well. (At the table the right button is the table's, and no gun is in view:
         // cards.rs. Dead, nothing is aimed.)
         let toggle = settings.scope_toggle || touch.on;
-        if table || !alive || fu {
+        if table || !alive || fu || giant {
             (g.scoped, g.aim_held) = (false, false);
         } else if pressed(Action::Aim) && matches!(g.weapon, Weapon::Sniper | Weapon::Rifle) {
             g.scoped = !(toggle && g.scoped);
@@ -2170,7 +2199,8 @@ pub fn tick(world: &mut World) {
                 tr.translation.y = p.y + 0.01 + (now * 2. + i as f32).sin() * 0.008;
             }
             // (What E would take here, or when an empty pad's pickup is back, is shown by the crosshair: hud.rs.)
-            let near = p.distance(pos + Vec3::Y * 0.04) < 0.15 && !g.infected;
+            // (The titan picks nothing up.)
+            let near = p.distance(pos + Vec3::Y * 0.04) < 0.15 && !g.infected && !giant;
             let ammo = g.pickups[i].state.weapon == kitchen_sim::map::AMMO_BOX;
             if ammo && available && near {
                 // A box of ammunition tops up the guns held, and is left for somebody else when they are full.
@@ -2207,17 +2237,17 @@ pub fn tick(world: &mut World) {
             }
         }
         // E at an electric griddle's dial switches it on or off (griddle.rs: within reach, facing it; anyone, in any phase).
-        if !options.demo && alive && !table && !fu && pressed(Action::Use) {
+        if !options.demo && alive && !table && !fu && !giant && pressed(Action::Use) {
             crate::griddle::press(world, &mut g);
         }
         // F strikes with whatever is in hand (in the free for all it bites a living hotdog in reach);
         // E eats one that is already dead. The living cannot be eaten.
-        if !options.demo && alive && !carrying && !table && !fu && pressed(Action::Melee) {
+        if !options.demo && alive && !carrying && !table && !fu && !giant && pressed(Action::Melee) {
             strike(&mut g, dir);
         }
         // Q picks up the loose object the hotdog looks at or stands beside, or puts down the one in its hands
         // where it aims. R, in a Forts build phase, says this player is ready for the forcefield to drop.
-        if !options.demo && alive && g.phase != Phase::Rest && !table && !fu && pressed(Action::Carry) {
+        if !options.demo && alive && g.phase != Phase::Rest && !table && !fu && !giant && pressed(Action::Carry) {
             g.pending_grab = true;
             // Forts: nothing is put down in a base (the ghost is grey there); Q leaves it in the hands.
             if carrying && g.placement([0.; 2]).is_some_and(|spot| spot.refused.is_some()) {
@@ -2246,7 +2276,7 @@ pub fn tick(world: &mut World) {
             }
         }
         // (E eats in the siege's famine alone: Free For All, which shares its phase, has no eating.)
-        if !options.demo && !fu && pressed(Action::Use) && g.phase == Phase::Famine && !g.feast.rules.ffa {
+        if !options.demo && !fu && !giant && pressed(Action::Use) && g.phase == Phase::Famine && !g.feast.rules.ffa {
             g.pending_eat = true;
             if !g.network && g.feast.eat(1) {
                 audio(world, v.bite.clone());
@@ -2276,8 +2306,19 @@ pub fn tick(world: &mut World) {
             };
             let playing = alive && !options.demo && g.phase != Phase::Rest && !table;
             kung_fu_input(&mut g, if playing { keys } else { FuKeys::default() }, movement, dt);
+        } else if giant {
+            let keys = TitanKeys {
+                // (A key bound to the swat or the smash works without the pointer captured; a mouse button needs it.)
+                swat: squeezed(Action::Swat) || (!table && bindings.held_by_key(Action::Swat, &keys)),
+                smash: (captured && held(Action::Smash)) || bindings.held_by_key(Action::Smash, &keys),
+                stomp: pressed(Action::Stomp),
+                charge: pressed(Action::Charge),
+                jump: pressed(Action::Jump),
+            };
+            let playing = alive && g.phase != Phase::Rest && !table;
+            titan_input(&mut g, if playing { keys } else { TitanKeys::default() }, movement, dt);
         }
-        if alive && !options.demo && g.phase != Phase::Rest && !table && !fu && (trigger || (options.profile && g.elapsed > 31.)) {
+        if alive && !options.demo && g.phase != Phase::Rest && !table && !fu && !giant && (trigger || (options.profile && g.elapsed > 31.)) {
             if carrying {
                 // The trigger throws what is carried.
                 if g.cooldown <= 0. {
@@ -2294,7 +2335,7 @@ pub fn tick(world: &mut World) {
         // Online: what this frame pressed and holds becomes the server's commands, one a step, each applied at
         // once to this player's own body (online.rs).
         if g.network {
-            let fire = if fu {
+            let fire = if fu || giant {
                 g.fu_hold & button::FIRE != 0
             } else {
                 trigger && alive && !options.demo && g.phase != Phase::Rest && !carrying && g.weapon != Weapon::Laden && !g.locked()
@@ -2335,7 +2376,7 @@ pub fn tick(world: &mut World) {
             if let Some(mut vis) = world.get_mut::<Visibility>(entity) {
                 // (Kung Fu: hands and feet, never a gun: kungfu/view.rs draws the first person's limbs.)
                 // (`g.demo` is the demo's, and a replay's viewer's while it is not through a player's eyes: replay/.)
-                *vis = if alive && !g.demo && !carrying && !table && !fu && weapon == g.weapon && !(g.scoped && weapon == Weapon::Sniper) { Visibility::Visible } else { Visibility::Hidden };
+                *vis = if alive && !g.demo && !carrying && !table && !fu && !giant && weapon == g.weapon && !(g.scoped && weapon == Weapon::Sniper) { Visibility::Visible } else { Visibility::Hidden };
             }
             // Both hands are busy during the stim clap, so the weapon dips out of the way.
             let u = g.clap / STIM_CLAP;
@@ -2412,6 +2453,7 @@ pub fn tick(world: &mut World) {
             g.feast.tick(frame_dt);
             // Kung Fu: the fight as it stands now (hud.rs, the animation, the sounds read it).
             g.kungfu = g.feast.kungfu_view();
+            g.titan = g.feast.titan_view();
             sync_local(world, &mut g, &v);
         }
         // This player's reserves and reload as shown, the +N of a pickup walked over, the reload's sounds (reload.rs).
@@ -2532,6 +2574,44 @@ fn kung_fu_input(g: &mut Game, keys: FuKeys, movement: Vec2, dt: f32) {
     }
 }
 
+/// The titan, as this player is it: what this frame's keys ask of it (controls.rs, the TITAN tab).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TitanKeys {
+    /// Held: the swat, the ground smash.
+    pub swat: bool,
+    pub smash: bool,
+    /// Pressed this frame: the stomp (a kick crouched), the charge, the jump.
+    pub stomp: bool,
+    pub charge: bool,
+    pub jump: bool,
+}
+/// The titan's buttons for `keys` (titan/interface.md section 1 and 4: no new bits): the levels every command carries
+/// (FIRE the swat, SCOPE the smash, CROUCH) and the presses one command carries (MELEE the stomp, STIM the charge, JUMP).
+pub fn titan_buttons(keys: &TitanKeys, crouch: bool) -> (u16, u16) {
+    let bit = |on: bool, b: u16| if on { b } else { 0 };
+    let held = bit(keys.swat, button::FIRE) | bit(keys.smash, button::SCOPE) | bit(crouch, button::CROUCH);
+    let pressed = bit(keys.stomp, button::MELEE) | bit(keys.charge, button::STIM) | bit(keys.jump, button::JUMP);
+    (held, pressed)
+}
+/// The titan, this frame: offline a command to the round itself (`Feast::titan_command`, which walks it, turns it,
+/// crouches it and starts its moves as the server does); online the levels for online.rs to put in every command
+/// (`fu_hold`, as Kung Fu's) and the presses it latches.
+fn titan_input(g: &mut Game, keys: TitanKeys, movement: Vec2, dt: f32) {
+    let (held, pressed) = titan_buttons(&keys, g.crouch);
+    (g.fu_hold, g.fu_style) = (held, None);
+    if g.network {
+        g.pending_melee |= keys.stomp;
+        g.pending_stim |= keys.charge;
+        return;
+    }
+    let me = g.me();
+    let command = kitchen_sim::net::Command::new(g.frame, movement, g.yaw, g.pitch, held | pressed, 0, None);
+    g.feast.titan_command(me, &command, dt);
+    if let Some(body) = g.feast.body(me) {
+        g.position = Vec3::new(body.p[0] as f32, body.p[1] as f32, body.p[2] as f32);
+    }
+}
+
 fn aim_turrets(world: &mut World, g: &Game) {
     crate::queries::with::<(&crate::level::Turret, &mut Transform), (), _>(world, |world, q| {
         for (turret, mut tr) in q.iter_mut(world) {
@@ -2543,6 +2623,21 @@ fn aim_turrets(world: &mut World, g: &Game) {
             }
         }
     });
+}
+/// Seconds a note the player must see (a mode the map refuses) stays on the screen.
+pub const NOTICE: f32 = 6.;
+/// Offline: the rules as they are played on `map`. A mode the map refuses (`Map::refuses`: Titan on a map with no titan
+/// layout, Kung Fu off the dojo, Forts with no Forts layout, anything on the dojo but Kung Fu) gives way to the map's own
+/// mode, every other rule kept, and the reason comes back to be said. (Online the server refuses such a game itself.)
+pub fn fit_rules(rules: &kitchen_sim::rules::Rules, map: &Map) -> (kitchen_sim::rules::Rules, Option<String>) {
+    use kitchen_sim::rules::{Mode, Rules};
+    let Some((asked, why)) = rules.mode().and_then(|asked| map.refuses(asked).map(|why| (asked, why))) else {
+        return (rules.clone(), None);
+    };
+    let own = Mode::made_for(map);
+    let base = Rules::playing(own, map);
+    let fitted = Rules { siege: base.siege, forts: base.forts, ffa: base.ffa, finite_ammo: base.finite_ammo, cards: base.cards, kungfu: base.kungfu, titan: base.titan, ..rules.clone() };
+    (fitted, Some(format!("{why}: playing {} instead of {}.", own.title(), asked.title())))
 }
 /// The spectator camera's eye and target at an orbit angle. Framed on the bundled counter (3.6 m by
 /// 1.36 m) and scaled about the middle of the map's bounds, so any counter fills the view the same way.
@@ -2617,6 +2712,8 @@ fn update_hud(world: &mut World, g: &Game) {
                         "She reaches for the knife.".into()
                     } else if g.phase == Phase::Peeling {
                         "That sound. The seal is opening.".into()
+                    } else if let Some(note) = g.notice() {
+                        note.to_string()
                     } else if g.message_time > 0. && !dead && hinted && g.phase != Phase::Over {
                         g.message.clone()
                     } else {
@@ -2719,6 +2816,11 @@ fn mirror(g: &mut Game) {
         g.ghosts.add(mine);
     }
     for p in g.online.latest.iter().filter(|p| p.alive && p.id != me) {
+        // (The titan is a giant: its footprint, its stature and its mass, so nobody predicts walking through it.)
+        if let Some(giant) = crate::titan::ghost_of(g, p.id) {
+            g.ghosts.add(giant);
+            continue;
+        }
         let mut body = Actor { radius: feast::HOTDOG_RADIUS, ..Actor::hotdog(p.id, at(p.p)) };
         (body.prone, body.crouch, body.grounded, body.v[1]) = (p.prone, p.crouch, p.grounded, p.v[1] as f64);
         g.ghosts.add(body);
@@ -2756,6 +2858,10 @@ pub fn apply_frame(world: &mut World, frame: &kitchen_sim::net::Frame) {
         // Kung Fu's word comes on its own (network.rs); a round that is not Kung Fu forgets it.
         if !(g.feast.rules.kungfu || g.feast.level.map.mode == "kungfu") {
             g.kungfu = None;
+        }
+        // (And the titan's: titan/.)
+        if !(g.feast.rules.titan || g.feast.level.map.mode == kitchen_sim::titan::MODE) {
+            g.titan = None;
         }
         // Forts: the mode's state, and the forcefield, which this client's level and props keep as the server's does.
         g.fort = frame.forts.clone();
@@ -3187,7 +3293,7 @@ fn update_players(world: &mut World, g: &mut Game, time: f32) {
         }
         world
             .entity_mut(e)
-            .insert(if !player.consumed && (player.id != 1 || spectator || third) {
+            .insert(if !player.consumed && (player.id != 1 || spectator || third) && !crate::titan::drawn_as_titan(g, player.id) {
                 Visibility::Visible
             } else {
                 Visibility::Hidden
@@ -3269,6 +3375,18 @@ fn update_survival_hud(world: &mut World, g: &Game) {
 /// head-up display, the models, the game) for single player by `rules` (the page's address words) from the start, the
 /// map's pickups on their pads, the game's camera and a focused window for `tick` to capture the pointer in. No
 /// system of the frame is added (each test adds what it runs), and the clock has started: see `test_frame`.
+/// For the tests: the map a round by `rules` starts on: the bundled counter, or for a mode played on a map of its own
+/// alone (Kung Fu, Titan) that map, as offline a map that refuses the mode would play its own instead (`fit_rules`).
+#[cfg(test)]
+pub(crate) fn test_map(rules: &str) -> Map {
+    use kitchen_sim::rules::Mode;
+    let name = match (crate::runtime::Options { params: rules.into(), ..default() }).rules().mode() {
+        Some(Mode::KungFu) => "kung-fu-dojo",
+        Some(Mode::Titan) => "titans-kitchen",
+        _ => return Map::bundled(),
+    };
+    Map::parse(&std::fs::read_to_string(format!("{}/assets/maps/{name}.json", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap()
+}
 #[cfg(test)]
 pub(crate) fn test_app(rules: &str) -> App {
     let mut app = App::new();
@@ -3280,7 +3398,7 @@ pub(crate) fn test_app(rules: &str) -> App {
         .init_resource::<AccumulatedMouseMotion>()
         .init_resource::<AccumulatedMouseScroll>()
         .insert_resource(crate::runtime::Options { skip_intro: true, params: rules.into(), ..default() })
-        .insert_resource(crate::level::StartMap(Map::bundled()))
+        .insert_resource(crate::level::StartMap(test_map(rules)))
         .add_systems(Startup, setup);
     app.update();
     let world = app.world_mut();
@@ -3310,6 +3428,63 @@ pub(crate) fn test_frame(app: &mut App, dt: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Offline, a mode the map refuses gives way to the map's own, every other rule kept, with the reason to say; a mode
+    /// the map takes is played as asked. Every mode, every bundled map.
+    #[test]
+    fn offline_a_mode_the_map_refuses_gives_way_to_the_maps_own() {
+        use kitchen_sim::rules::{Mode, Rules};
+        let read = |name: &str| Map::parse(&std::fs::read_to_string(format!("{}/assets/maps/{name}.json", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap();
+        let maps = [Map::bundled(), read("pillow-fort"), read("kung-fu-dojo"), read("titans-kitchen")];
+        for map in &maps {
+            for mode in Mode::ALL {
+                let asked = Rules { sandbox: true, god: true, ..Rules::of(Some(mode)) };
+                let (played, why) = fit_rules(&asked, map);
+                assert!(played.sandbox && played.god, "the other rules are kept");
+                match map.refuses(mode) {
+                    None => assert_eq!((played, why), (asked.clone(), None), "{} as {}", map.name, mode.title()),
+                    Some(reason) => {
+                        let own = Mode::made_for(map);
+                        assert!(map.refuses(own).is_none());
+                        assert_eq!(played.mode().unwrap_or(own), own, "{} as {}: {:?}", map.name, mode.title(), played.mode());
+                        let why = why.unwrap();
+                        assert!(why.starts_with(&reason) && why.contains(own.title()) && why.contains(mode.title()), "{why}");
+                    }
+                }
+            }
+        }
+        // Titan on the bundled counter: a siege, and why.
+        let (played, why) = fit_rules(&Rules::parse("mode=titan titan=me"), &Map::bundled());
+        assert!(!played.titan && played.mode().is_none_or(|m| m == Mode::Siege));
+        assert_eq!(why.as_deref(), Some("Counter Siege has no Titan layout: playing Siege instead of Titan."));
+    }
+
+    /// `?play&map=counter-siege&mode=titan`: the round is a siege, the note is on the screen for a while and is said
+    /// once, not again at the next round.
+    #[test]
+    fn offline_titan_on_a_counter_plays_the_siege_and_says_so_once() {
+        let mut app = test_app("");
+        let g = app.world_mut().resource_mut::<Game>().into_inner();
+        // (As `tick` starts a round: the address's rules.)
+        g.rules = crate::runtime::Options { params: "mode=titan".into(), ..default() }.rules();
+        g.begin();
+        assert!(g.titan.is_none() && g.feast.titan_id().is_none() && !g.rules.titan && g.rules.mode().is_none_or(|m| m == kitchen_sim::rules::Mode::Siege));
+        let note = g.notice().map(str::to_string).expect("a note on the screen");
+        assert!(note.contains("no Titan layout"), "{note}");
+        g.notice_time = 0.;
+        g.begin();
+        assert!(g.notice().is_none(), "said once");
+        // Natively, Titan with no map named plays Titan's Kitchen (and Forts Pillow Fort).
+        use kitchen_sim::rules::Mode;
+        assert_eq!((crate::level::own_map(Some(Mode::Titan)), crate::level::own_map(Some(Mode::Forts)), crate::level::own_map(Some(Mode::Ffa)), crate::level::own_map(None)), (Some("titans-kitchen"), Some("pillow-fort"), None, None));
+        assert_eq!(crate::level::own_map(Some(Mode::KungFu)), Some("kung-fu-dojo"), "and Kung Fu its dojo");
+        let dojo = crate::runtime::Options { params: "mode=kungfu".into(), ..default() };
+        assert_eq!(crate::level::choose(&dojo).unwrap().name, "Kung Fu Dojo");
+        let options = crate::runtime::Options { params: "mode=titan".into(), ..default() };
+        assert_eq!(crate::level::choose(&options).unwrap().mode, kitchen_sim::titan::MODE);
+        let named = crate::runtime::Options { params: "mode=titan".into(), map: format!("{}/assets/maps/counter-siege.json", env!("CARGO_MANIFEST_DIR")), ..default() };
+        assert_eq!(crate::level::choose(&named).unwrap().name, "Counter Siege", "a map named is the one played");
+    }
     /// Online the placement preview asks the client's copy of the round about this player's hotdog where its
     /// prediction has it (not where the copy last had it), holding what the server's frames say it holds, at the pace
     /// the client keeps, and gives the same answer as the round itself would; the copy is left as it was.
@@ -4352,6 +4527,45 @@ mod tests {
         assert_eq!(mine(&app).mv().data().kind, Kind::Dodge, "{:?}", mine(&app).mv());
         assert!(app.world().resource::<Game>().feast.player(1).is_some_and(|p| p.stim <= 0.), "no stim in Kung Fu");
     }
+    /// The titan's keys (controls.rs, the TITAN tab) are the interface's bits: the swat FIRE and the smash SCOPE held,
+    /// the crouch held, the stomp MELEE, the charge STIM and the jump pressed.
+    #[test]
+    fn the_titans_buttons_are_the_interfaces_bits() {
+        let (held, pressed) = titan_buttons(&TitanKeys { swat: true, stomp: true, charge: true, ..default() }, true);
+        assert_eq!((held, pressed), (button::FIRE | button::CROUCH, button::MELEE | button::STIM));
+        let (held, pressed) = titan_buttons(&TitanKeys { smash: true, jump: true, ..default() }, false);
+        assert_eq!((held, pressed), (button::SCOPE, button::JUMP));
+        assert_eq!(titan_buttons(&TitanKeys::default(), false), (0, 0));
+    }
+
+    /// Offline, the player who is the titan drives it (`Feast::titan_command`): Shift charges, and nothing of the guns,
+    /// the stim or the pickups is heard; a small hotdog's Shift is still its stim.
+    #[test]
+    fn the_titans_player_charges_on_shift_and_a_small_hotdog_stims() {
+        let map = || Map::parse(include_str!("../assets/maps/titans-kitchen.json")).unwrap();
+        for (pick, titan) in [("me", true), ("bot", false)] {
+            let mut app = test_app(&format!("sandbox mode=titan titan={pick} botmode=idle"));
+            app.add_systems(Update, tick);
+            load_map(app.world_mut(), map());
+            for _ in 0..3 {
+                test_frame(&mut app, 0.05);
+            }
+            let g = app.world().resource::<Game>();
+            assert_eq!(crate::titan::titan_id(g) == Some(g.me()), titan, "{pick}");
+            app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftLeft);
+            test_frame(&mut app, 0.05);
+            let g = app.world().resource::<Game>();
+            let view = g.titan.as_ref().unwrap();
+            let stimmed = g.feast.player(g.me()).is_some_and(|p| p.stim > 0.);
+            if titan {
+                assert_eq!((view.mv(), stimmed), (kitchen_sim::titan::Move::Charge, false), "the charge winds up");
+                assert_eq!(g.weapon, g.weapon, "no gun changes");
+            } else {
+                assert!(view.mv() != kitchen_sim::titan::Move::Charge && stimmed, "the small hotdog's stim");
+            }
+        }
+    }
+
     #[test]
     fn kung_fus_buttons_are_the_interfaces_bits_and_the_styles_go_round() {
         let keys = FuKeys { light: true, block: true, kick: true, dodge: true, ..default() };

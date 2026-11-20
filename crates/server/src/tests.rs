@@ -1070,10 +1070,11 @@ fn random_draws_a_map_of_the_chosen_mode_each_time_the_fridge_opens_never_the_on
     let a = t.page(json!({"name": "Ann"}));
     let b = t.page(json!({"name": "Ben"}));
     t.run(0.1);
-    // (Random draws from the maps that can hold the mode: a siege from every map but the dojo, Forts from the Forts maps.)
+    // (Random draws from the maps that can hold the mode: a siege from every map but the dojo (Titan's Kitchen too: it has
+    // a cat spawn point), Forts from the Forts maps.)
     let siege: Vec<String> = t.lobby.maps.iter().filter(|e| lobby::refusal(e, "siege").is_none()).map(|e| e.name.clone()).collect();
     let forts: Vec<String> = t.lobby.maps.iter().filter(|e| lobby::refusal(e, "forts").is_none()).map(|e| e.name.clone()).collect();
-    assert!(siege.len() == 13 && forts.len() == 4 && siege.iter().any(|name| name == "pillow-fort"), "{siege:?} {forts:?}");
+    assert!(siege.len() == 14 && forts.len() == 4 && siege.iter().any(|name| name == "pillow-fort"), "{siege:?} {forts:?}");
     let go = |t: &mut Table| {
         for page in [&a, &b] {
             t.ready(page, true);
@@ -3283,4 +3284,156 @@ fn free_for_all_from_the_lobby_runs_its_rounds_out() {
     t.lobby.game.feast.player_mut(ann).unwrap().ammo[1] = 0;
     t.run(0.2);
     assert_eq!(t.hotdog(&a).ammo[1], 0, "not topped up");
+}
+
+// ----- Titan (kitchen_sim::titan): one giant hotdog against the rest, chosen in the lobby, told as JSON text beside the
+// frames.
+
+#[test]
+fn the_leader_chooses_titan_on_titans_kitchen_and_who_is_the_titan_and_the_round_casts_it() {
+    use kitchen_sim::titan::Pick;
+    assert_eq!((lobby::TITAN, lobby::mode_name(lobby::TITAN), lobby::default_map(lobby::TITAN)), ("titan", "Titan", "titans-kitchen"));
+    assert!(lobby::PLAYS.contains(&lobby::TITAN));
+    let mut t = Table::new(Settings { countdown: 0.2, opening: 0.3, ..Settings::default() }, None, |_| {});
+    let a = t.page(json!({"name": "Ann"}));
+    let b = t.page(json!({"name": "Ben"}));
+    t.run(0.1);
+    // Titan is played on the titan's arena alone; the other gun modes but Forts play the arena too.
+    let arena = t.lobby.maps.iter().find(|e| e.name == "titans-kitchen").cloned().unwrap();
+    assert_eq!(lobby::modes(&arena), vec!["siege", "ffa", "titan"]);
+    assert!(lobby::refusal(t.lobby.maps.iter().find(|e| e.name == "counter-siege").unwrap(), "titan").unwrap().contains("no Titan layout"));
+    assert!(t.lobby.choose(a.member(), Some(&json!("titan")), None));
+    assert_eq!((t.lobby.choice.mode.as_str(), t.lobby.choice.name.as_str(), t.lobby.mode()), ("titan", "titans-kitchen", "titan"));
+    t.run(0.1);
+    let roster = a.last("roster").unwrap();
+    assert_eq!((roster["mode"].clone(), roster["titan"]["pick"].clone()), (json!("titan"), json!("auto")));
+    // Only the leader chooses the titan, from the names a page sends.
+    t.handle(&b, json!({"type": "choose", "titan": "me"}));
+    assert_eq!(notice(&b), "Only the leader can choose the titan.");
+    t.handle(&a, json!({"type": "choose", "titan": "everyone"}));
+    assert_eq!(notice(&a), "There is no such choice of titan.");
+    t.handle(&a, json!({"type": "choose", "titan": b.member()}));
+    assert_eq!((t.lobby.titan, t.lobby.titan_pick()), (lobby::TitanChoice::Member(b.member()), Pick::Seat(b.player.unwrap())));
+    assert!(a.says("Ann chose the titan: Ben. Ready up again"), "{:?}", a.all("system"));
+    t.handle(&a, json!({"type": "choose", "titan": "me"}));
+    t.run(0.1);
+    let roster = b.last("roster").unwrap();
+    assert_eq!((roster["titan"]["pick"].clone(), roster["titan"]["member"].clone()), (json!("me"), json!(a.member())));
+    // The fridge opens on the arena: Ann is the titan, and the rules every frame carries say so.
+    for page in [&a, &b] {
+        t.ready(page, true);
+    }
+    for _ in 0..40 {
+        if t.lobby.game.phase == Phase::Round {
+            break;
+        }
+        t.run(0.1);
+    }
+    let ann = t.lobby.player(a.member()).unwrap();
+    let game = &t.lobby.game;
+    assert_eq!((game.phase, game.map.name.as_str(), game.stage(), game.seats()), (Phase::Round, "Titan's Kitchen", "FreeForAll", 6));
+    assert_eq!(game.feast.titan_id(), Some(ann));
+    assert_eq!(game.frame().rules, format!("mode=titan titan={ann}"));
+    t.run(0.1);
+    assert_eq!(a.last("roster").unwrap()["titan"]["player"], json!(ann));
+    // Ann's command is the titan's: the trigger swats.
+    let c = Command::new(1, Vec2::ZERO, 0., 0., button::FIRE, 0, None);
+    t.lobby.game.commands(ann, &[c]);
+    t.run(0.1);
+    assert_eq!(t.lobby.game.feast.titan.as_ref().unwrap().mv, kitchen_sim::titan::Move::SwatHigh);
+    // Back in the lobby, a bot: the next round's titan is a bot, and the round after another.
+    t.finish(None);
+    t.handle(&a, json!({"type": "choose", "titan": "bot"}));
+    let mut titans = vec![];
+    for _ in 0..2 {
+        for page in [&a, &b] {
+            t.ready(page, true);
+        }
+        while t.lobby.game.phase != Phase::Round {
+            t.run(0.1);
+        }
+        t.run(0.5);
+        let id = t.lobby.game.feast.titan_id().unwrap();
+        assert!(t.lobby.game.player(id).unwrap().bot && t.lobby.game.player(id).unwrap().name == kitchen_sim::titan::NAME);
+        titans.push(id);
+        // (The small hotdogs win: everyone else stands.)
+        let feast = &mut t.lobby.game.feast;
+        feast.player_mut(id).unwrap().hp = 1.;
+        feast.hurt(id, 10.);
+        t.run(8.6);
+        assert_eq!(t.lobby.game.stage(), "Lobby");
+    }
+    assert_ne!(titans[0], titans[1], "bots take turns");
+}
+#[test]
+fn the_command_line_starts_the_lobby_on_titan_with_mode_titan() {
+    let args = |list: &[&str]| list.iter().map(|s| s.to_string()).chain(["--root".into(), ROOT.into()]).collect::<Vec<String>>();
+    let config = crate::config::parse(&args(&["--mode", "titan"])).unwrap();
+    assert_eq!((config.map.name.as_str(), config.map.mode.as_str()), ("Titan's Kitchen", "titan"));
+    let game = Game::with_rules(config.map.clone(), &config.settings, Rules::default());
+    assert!(game.rules().titan && game.feast.titan.is_some() && game.seats() == 6, "a titan map is Titan when no mode is named");
+}
+#[test]
+fn the_titan_reaches_every_game_socket_as_json_on_joining_on_change_and_every_second_beside_unchanged_frames() {
+    use crate::hub::Event;
+    use kitchen_sim::titan::View;
+    let settings = Settings { countdown: 0., opening: 0., ..Settings::default() };
+    let game = Game::with_rules(read_map("assets/maps/titans-kitchen.json"), &settings, Rules::default());
+    assert!(game.rules().titan && game.feast.titan.is_some(), "the arena plays Titan by itself");
+    let lobby = Lobby::new(game, settings, Options::new(maps_folder()));
+    let mut hub = Hub::new(lobby, crate::config::Net::default());
+    let (outbox, a, frames) = Outbox::memories();
+    hub.event(Event::Open { peer: 1, page: false, outbox });
+    hub.event(Event::Message { peer: 1, message: json!({"type": "join", "version": 12, "name": "Ann"}) });
+    let b = socket(&mut hub, 2, json!({"type": "join", "version": 12, "name": "Bob", "json": true}));
+    for inbox in [&a, &b] {
+        let told = texts(inbox, "titan");
+        assert!(!told.is_empty(), "told as it sat down");
+        let view: View = serde_json::from_value(told[0].clone()).unwrap();
+        assert!(view.titan > 0 && view.max > 0. && view.hp == view.max && view.pool == view.reserve && view.smalls.len() == 5, "{view:?}");
+    }
+    for peer in [1, 2] {
+        hub.event(Event::Message { peer, message: json!({"type": "ready", "ready": true}) });
+    }
+    for _ in 0..600 {
+        if hub.lobby.game.phase == Phase::Round {
+            break;
+        }
+        hub.advance();
+    }
+    assert_eq!(hub.lobby.game.phase, Phase::Round);
+    // The bots fight: the titan's health falls and its moves are told, as the server's own view has them.
+    let before = texts(&b, "titan").len();
+    for _ in 0..(20. * HZ) as usize {
+        hub.advance();
+    }
+    let told: Vec<View> = texts(&b, "titan").into_iter().skip(before).map(|v| serde_json::from_value(v).unwrap()).collect();
+    assert!(told.len() >= 20, "{}", told.len());
+    assert!(told.iter().any(|v| v.hp < v.max), "the titan was hurt");
+    assert!(told.iter().any(|v| v.events.iter().any(|e| e.kind == Some(kitchen_sim::titan::EventKind::Tell))), "its tells");
+    let last = told.last().unwrap();
+    let server = hub.lobby.game.feast.titan_view().unwrap();
+    assert_eq!((last.titan, last.max), (server.titan, server.max));
+    // At most a message a frame step, and at least one a SYNC while nothing changes (the round over and still).
+    let every = crate::config::Net::default().every() as usize;
+    let before = texts(&b, "titan").len();
+    for _ in 0..120 {
+        hub.advance();
+    }
+    assert!(texts(&b, "titan").len() - before <= 120 / every);
+    let game = &mut hub.lobby.game.feast;
+    game.stage = Stage::RoundOver;
+    (game.over_at, game.follow) = (game.elapsed, false);
+    for _ in 0..(0.5 * HZ) as usize {
+        hub.advance();
+    }
+    let before = texts(&b, "titan").len();
+    for _ in 0..(3.1 * HZ) as usize {
+        hub.advance();
+    }
+    let quiet = texts(&b, "titan").len() - before;
+    assert!((3..=4).contains(&quiet), "{quiet} in three quiet seconds");
+    // Frames are as they always were: binary, protocol 12.
+    let bytes = frames.lock().unwrap().last().cloned().expect("binary frames");
+    assert_eq!(bytes[0], kitchen_sim::net::FRAME);
 }

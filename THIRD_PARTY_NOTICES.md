@@ -21,7 +21,8 @@ third-party model, rig, texture or recording.
 - **Synthesised sounds**: `sizzle.wav` and `click.wav` (`tools/build_griddle_sounds.py`), the `fu-*.wav` sounds
   (`tools/build_kungfu_sounds.py`), `whoosh.wav` and `thwack.wav` (`tools/build_melee_sounds.py`), `relish-splat.wav`
   and `relish-thump.wav` (`tools/build_relish_sounds.py`), `reload-*.wav` (`tools/build_reload_sounds.py`),
-  `squelch.wav` and `squirt.wav` (`tools/build_squirt_sounds.py`): noise, sines and envelopes, nothing sampled.
+  `squelch.wav` and `squirt.wav` (`tools/build_squirt_sounds.py`), the `titan-*.wav` sounds
+  (`tools/build_titan_sounds.py`): noise, sines and envelopes, nothing sampled.
 - `pew.wav`, `bite.wav`, `boom.wav` and `ding.wav` came with the project's first commit: short mono 22050 Hz synthetic
   effects. No script that made them is in the repository; the project owner states that they, like every other `.wav`
   file here, are freely distributable.

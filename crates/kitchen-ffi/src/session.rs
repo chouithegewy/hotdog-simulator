@@ -741,6 +741,7 @@ impl Game {
             Mode::KungFu => KS_MODE_KUNGFU,
             Mode::Ffa => KS_MODE_FFA,
             Mode::Forts => KS_MODE_FORTS,
+            Mode::Titan => KS_MODE_TITAN,
             Mode::Siege if f.level.map.mode == kungfu::MODE => KS_MODE_KUNGFU,
             Mode::Siege => KS_MODE_SIEGE,
         };

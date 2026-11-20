@@ -27,7 +27,8 @@ const OVER: [f64; 2] = [0.025, 0.02];
 /// Whether `level` leaves a block to this module: the counter things, everything among KITS after the appliances.
 pub fn drawn(style: &str) -> bool {
     // (The electric griddle is one of KITS, but griddle.rs draws it: it heats, glows and smokes. dojo.rs draws the gong: it swings.)
-    KITS[FIRST_KITS..].contains(&style) && style != kitchen_sim::griddle::STYLE && style != crate::dojo::GONG
+    // (The fridge, the oven and the pet's bowl stand on the kitchen floor: floor.rs draws them.)
+    KITS[FIRST_KITS..].contains(&style) && style != kitchen_sim::griddle::STYLE && style != crate::dojo::GONG && !crate::floor::KITS.contains(&style)
 }
 
 /// The counter top as rectangles [min x, min z, max x, max z]: the counter's outline (a little past the playable

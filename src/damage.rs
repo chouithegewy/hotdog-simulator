@@ -16,6 +16,12 @@
 //!   bottom of the ring (it is from below). Hunger, a fall, and a hit from straight above or below have no way to point:
 //!   the whole ring pulses, faintly. The edge of the screen nearest the source flashes a soft red as well. The settings
 //!   turn all this off (settings.rs `damage_indicators`).
+//! * **Hits on the giant** (Titan, this player the titan: [`Hurt::giant`]): it is under fire all match, and a hotdog's
+//!   feedback would keep its screen red. Its rounds and blows are shown as the share of its health they take: one soft,
+//!   faint cue for each eighth of the way round they come from, whoever fired ([`Hurt::giant_hit`]), out on a wide ring
+//!   clear of the crosshair and, in its third person, of the giant itself ([`giant_radius`]), and no flash of the edges.
+//!   A **weak-spot hit** is its own cue ([`Hurt::weak_hit`]): a thick gold arc pointing at the shooter (following it),
+//!   with the weak spot's icon, and the edge on that side flashing gold; a **stagger** pulses every edge once, amber.
 //! * **This player's hits** (the hit marker): four small white ticks round the crosshair when a shot or a blow of this
 //!   player's hurts a hotdog; a kill (a hotdog, or a cat that adds to this player's kills) makes them bigger, thicker and
 //!   red, and turns the crosshair itself into a red cross for a moment (`Game::mark_hit`). A backstab keeps its dagger
@@ -69,6 +75,18 @@ const TICKS: [(f32, f32, f32); 2] = [(7., 13., 2.6), (6., 18.5, 4.)];
 /// The edges' flash at its brightest, and how far in it reaches (a share of the screen).
 const EDGE: f32 = 0.5;
 const EDGE_IN: [f32; 2] = [22., 30.];
+/// Titan, the giant's own feedback: the share of its full health that, taken within ADD_UP, makes a cue as heavy as FULL
+/// makes a hotdog's; the wide ring its cues stand on, as a share of the window's smaller side; each cue's half angle and
+/// thickness (at SCALE), soft and weak-spot; and the strength of a stagger's pulse round the edges.
+pub const GIANT_SHARE: f32 = 0.03;
+pub const GIANT_RING: f32 = 0.36;
+const GIANT_SPREAD: [f32; 2] = [0.2, 0.17];
+const GIANT_THICK: [f32; 2] = [6., 13.];
+const STAGGER_PULSE: f32 = 0.6;
+const WEAK_EDGE: f32 = 0.6;
+/// The weak spot's gold (hud.rs), and a stagger's amber.
+pub const WEAK_RGB: [f32; 3] = [1.0, 0.84, 0.3];
+pub const STAGGER_RGB: [f32; 3] = [1.0, 0.62, 0.18];
 
 /// What hurt, by its colour.
 pub const SHOT_RGB: [f32; 3] = [1.0, 0.2, 0.16];
@@ -254,8 +272,10 @@ pub struct Arc {
     /// The real time of the last hit from it, and of the last that popped it.
     pub born: f32,
     pub popped: f32,
-    /// The HP it took lately (added up over ADD_UP).
+    /// The HP it took lately (added up over ADD_UP; the giant's, scaled to a hotdog's: [`Hurt::giant_hit`]).
     pub hurt: f32,
+    /// Titan: a weak-spot hit on the giant (gold, thick, with the icon, and the edge flashes).
+    pub weak: bool,
 }
 impl Arc {
     /// Where it stands round the crosshair (see [`angle`]).
@@ -270,6 +290,14 @@ impl Arc {
     pub fn alpha(&self, now: f32) -> f32 {
         fade(now - self.born) * (0.55 + 0.45 * self.weight())
     }
+    /// How opaque a cue of the giant's is at `now`: a soft one faint (more so for a little damage), a weak-spot hit whole.
+    pub fn giant_alpha(&self, now: f32) -> f32 {
+        fade(now - self.born) * if self.weak { 1. } else { 0.12 + 0.5 * (self.hurt / FULL).min(1.) }
+    }
+}
+/// Titan: the radius (logical pixels) of the ring the giant's cues stand on, in a window `w` by `h`.
+pub fn giant_radius(w: f32, h: f32) -> f32 {
+    GIANT_RING * w.min(h)
 }
 /// The whole ring's pulse.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -288,6 +316,11 @@ pub struct Hurt {
     pub watch: Watch,
     /// What the records told this frame (a replay's recorded view keeps it: replay/pov.rs).
     pub heard: Vec<Event>,
+    /// Titan: the giant's full health while this player is the giant (None: a hotdog's feedback, as always).
+    pub giant: Option<f32>,
+    /// Titan: the newest of the giant's events heard (`titan::View::events` are numbered), and a stagger's pulse.
+    pub told: u32,
+    pub pulse: Option<Ring>,
     ui: Option<Ui>,
 }
 impl Hurt {
@@ -325,13 +358,62 @@ impl Hurt {
                 (a.at, a.follow, a.wide, a.below, a.tint, a.born) = (at, follow, wide, below, tint, now);
             }
             None => {
-                self.arcs.push(Arc { key, at, follow, wide, below, tint, born: now, popped: now, hurt: amount });
-                if self.arcs.len() > ARCS {
-                    let oldest = self.arcs.iter().enumerate().min_by(|a, b| a.1.born.total_cmp(&b.1.born)).map(|(i, _)| i).unwrap();
-                    self.arcs.remove(oldest);
-                }
+                self.arcs.push(Arc { key, at, follow, wide, below, tint, born: now, popped: now, hurt: amount, weak: false });
+                self.trim();
             }
         }
+    }
+    /// At most ARCS: the oldest goes.
+    fn trim(&mut self) {
+        if self.arcs.len() > ARCS {
+            let oldest = self.arcs.iter().enumerate().min_by(|a, b| a.1.born.total_cmp(&b.1.born)).map(|(i, _)| i).unwrap();
+            self.arcs.remove(oldest);
+        }
+    }
+    /// Titan: a round or a blow on the giant (this player; `max` its full health), by its record, its chest at `chest`:
+    /// one soft cue for each eighth of the way round, whoever fired, as heavy as the share of its health taken from there
+    /// lately (GIANT_SHARE of it is a hotdog's FULL). What has no way to point (a fall) shows nothing.
+    pub fn giant_hit(&mut self, record: &Damage, chest: Vec3, now: f32, max: f32) {
+        let record = &Damage { kind: feast::plain_kind(record.kind), ..*record };
+        let Cue::From { at, .. } = cue(record, chest) else {
+            return;
+        };
+        let amount = record.amount.max(0.) / (max.max(1.) * GIANT_SHARE) * FULL;
+        let sector = Self::sector(at - chest);
+        let key = (0, sector, 0);
+        match self.arcs.iter_mut().find(|a| a.key == key) {
+            Some(a) => {
+                a.hurt = a.hurt * (-(now - a.born).max(0.) / ADD_UP).exp() + amount;
+                (a.at, a.born) = (at, now);
+            }
+            None => {
+                self.arcs.push(Arc { key, at, follow: 0, wide: true, below: false, tint: SHOT_RGB, born: now, popped: now, hurt: amount, weak: false });
+                self.trim();
+            }
+        }
+    }
+    /// Titan: a weak-spot hit on the giant by `by` (its chest at `from`, followed while it lives), `amount` of its
+    /// health: a gold cue of its own pointing at the shooter, popping, and the edge on that side flashing gold.
+    pub fn weak_hit(&mut self, by: u32, from: Vec3, chest: Vec3, now: f32, amount: f32) {
+        let key = (by, Self::sector(from - chest), 9);
+        match self.arcs.iter_mut().find(|a| a.key == key) {
+            Some(a) => {
+                a.hurt = a.hurt * (-(now - a.born).max(0.) / ADD_UP).exp() + amount;
+                (a.at, a.born, a.popped) = (from, now, now);
+            }
+            None => {
+                self.arcs.push(Arc { key, at: from, follow: by, wide: true, below: false, tint: WEAK_RGB, born: now, popped: now, hurt: amount.max(FULL), weak: true });
+                self.trim();
+            }
+        }
+    }
+    /// Titan: the giant staggers: every edge pulses once, amber.
+    pub fn stagger(&mut self, now: f32) {
+        self.pulse = Some(Ring { born: now, tint: STAGGER_RGB });
+    }
+    /// Which eighth of the way round a source lies in, `way` from the chest.
+    fn sector(way: Vec3) -> i32 {
+        (way.x.atan2(way.z) / (TAU / 8.)).round() as i32 & 7
     }
     /// A hit of this player's at real time `now` (`kill`: it killed). A kill's marker is not cut short by a hit.
     pub fn mark(&mut self, now: f32, kill: bool) {
@@ -351,6 +433,9 @@ impl Hurt {
         if self.ring.is_some_and(|r| now - r.born >= RING_LIFE) {
             self.ring = None;
         }
+        if self.pulse.is_some_and(|r| now - r.born >= FLASH) {
+            self.pulse = None;
+        }
         if self.marker.is_some_and(|(at, kill)| now - at >= if kill { KILL } else { HIT }) {
             self.marker = None;
         }
@@ -368,8 +453,10 @@ impl Hurt {
                 *total += a;
             }
         };
-        for arc in &self.arcs {
-            let strength = flash(now - arc.popped) * (0.5 + 0.5 * arc.weight());
+        // (The giant's soft cues never flash the edges: only a weak-spot hit does.)
+        for arc in self.arcs.iter().filter(|a| self.giant.is_none() || a.weak) {
+            // (The giant's nape can be hit again and again: its gold flash is a pulse at the edge, not a wash.)
+            let strength = flash(now - arc.popped) * (0.5 + 0.5 * arc.weight()) * if arc.weak { WEAK_EDGE } else { 1. };
             let theta = arc.angle(eye, yaw);
             let (c, s) = (theta.cos(), theta.sin());
             for (side, share) in [c.max(0.), s.max(0.), (-c).max(0.), (-s).max(0.)].into_iter().enumerate() {
@@ -379,6 +466,11 @@ impl Hurt {
         if let Some(r) = self.ring {
             for side in 0..4 {
                 add(side, r.tint, 0.4 * flash(now - r.born));
+            }
+        }
+        if let Some(r) = self.pulse {
+            for side in 0..4 {
+                add(side, r.tint, STAGGER_PULSE * flash(now - r.born));
             }
         }
         sum.map(|(c, total)| if total > 0. { (c.map(|v| v / total), (total * EDGE).min(EDGE)) } else { ([0.; 3], 0.) })
@@ -402,6 +494,7 @@ pub fn update(world: &mut World) {
     let settings = world.get_resource::<crate::settings::Settings>().copied().unwrap_or_default();
     let mut hurt = world.remove_resource::<Hurt>().unwrap_or_default();
     // What the round tells, and where this player is and looks.
+    let mut giant_news = vec![];
     let (events, view, network) = match world.get_resource::<Game>() {
         Some(g) if g.playing() && !g.demo => {
             let events = hurt.watch.hear(g.me(), &g.roster, g.elapsed, g.phase_name());
@@ -410,10 +503,17 @@ pub fn update(world: &mut World) {
             // (Where this player is drawn: online its prediction, ahead of the server's word.)
             let eye = g.position + Vec3::Y * me.map_or(feast::CHEST[0], |p| feast::CHEST[if p.prone { 2 } else if p.crouch { 1 } else { 0 }]);
             hurt.age(&g.roster, now);
+            // Titan: this player the giant, its full health, and what its events tell that is new.
+            let titan = g.titan.as_ref().filter(|v| v.titan != 0 && v.titan == g.me());
+            hurt.giant = titan.map(|v| v.max);
+            if let Some(v) = titan {
+                giant_news = giant_heard(&mut hurt.told, v, &g.roster);
+            }
             (events, alive.then_some((eye, g.yaw)), g.network)
         }
         Some(_) => {
             hurt.watch = Watch::default();
+            (hurt.giant, hurt.told) = (None, 0);
             (vec![], None, false)
         }
         None => {
@@ -432,7 +532,10 @@ pub fn update(world: &mut World) {
         match *e {
             Event::Hurt(record) => {
                 if let (Some((eye, _)), true) = (view, settings.damage_indicators) {
-                    hurt.hit(&record, eye, now);
+                    match hurt.giant {
+                        Some(max) => hurt.giant_hit(&record, eye, now, max),
+                        None => hurt.hit(&record, eye, now),
+                    }
                 }
             }
             Event::Dealt { kill, at, .. } => {
@@ -459,14 +562,53 @@ pub fn update(world: &mut World) {
             }
         }
     }
+    if let (Some((eye, _)), true) = (view, settings.damage_indicators) {
+        for news in giant_news {
+            match news {
+                GiantNews::Weak { by, from, amount } => hurt.weak_hit(by, from, eye, now, amount),
+                GiantNews::Stagger => hurt.stagger(now),
+            }
+        }
+    }
     if view.is_none() {
         hurt.marker = None;
     }
     if !settings.damage_indicators {
-        (hurt.arcs, hurt.ring) = (vec![], None);
+        (hurt.arcs, hurt.ring, hurt.pulse) = (vec![], None, None);
     }
     draw(world, &mut hurt, view, now);
     world.insert_resource(hurt);
+}
+
+/// Titan: what the giant's events tell its own player that a record does not.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GiantNews {
+    /// A weak-spot hit: by whom, where it was (its chest), and the health it took.
+    Weak { by: u32, from: Vec3, amount: f32 },
+    /// The giant staggers.
+    Stagger,
+}
+/// Titan: the giant's events in `view` newer than `told` (which it moves on; numbered afresh each round, so a count
+/// that went back starts again), as the giant's player is told them; the shooters' places from `roster`.
+pub fn giant_heard(told: &mut u32, view: &kitchen_sim::titan::View, roster: &[Player]) -> Vec<GiantNews> {
+    use kitchen_sim::titan::EventKind;
+    let newest = view.events.iter().map(|e| e.id).max().unwrap_or(0);
+    if newest < *told {
+        *told = 0;
+    }
+    let mut out = vec![];
+    for e in view.events.iter().filter(|e| e.id > *told) {
+        match e.kind {
+            Some(EventKind::WeakHit) if e.to == view.titan || e.to == 0 => {
+                let from = roster.iter().find(|p| p.id == e.by).map_or(Vec3::from_array(e.p), chest);
+                out.push(GiantNews::Weak { by: e.by, from, amount: e.amount });
+            }
+            Some(EventKind::StaggerStart) => out.push(GiantNews::Stagger),
+            _ => {}
+        }
+    }
+    *told = (*told).max(newest);
+    out
 }
 
 // ----- On the screen.
@@ -478,12 +620,20 @@ struct Ui {
     ring: Entity,
     marker: Entity,
     edges: Entity,
-    /// The window's logical height share (hud.rs `Size`) and scale factor it was built for.
-    size: (f32, f32),
+    /// The window's logical height share (hud.rs `Size`), scale factor and the giant's ring (logical pixels) it was
+    /// built for.
+    size: (f32, f32, f32),
     /// The images: the narrow arc, the wide, the ring, the hit's ticks, the kill's; and the side (logical pixels) of the
     /// ring's and of each marker's.
     images: [Handle<Image>; 5],
     sides: [f32; 3],
+    /// Titan, the giant's own: a pool of cues on the wide ring, their images (soft, weak-spot) and sizes (logical
+    /// pixels), how far out the middle of each image stands, and the weak spot's icon.
+    giant: Vec<Entity>,
+    giant_images: [Handle<Image>; 2],
+    giant_sizes: [Vec2; 2],
+    giant_mid: [f32; 2],
+    weak_icon: Entity,
 }
 
 /// Device pixels a unit at SCALE takes.
@@ -501,15 +651,42 @@ fn ring_side(u: f32) -> u32 {
 fn marker_side(u: f32, kill: bool) -> u32 {
     (2. * (TICKS[kill as usize].1 + 3.) * u + 2. * rim(u) + 2.).ceil() as u32
 }
+/// Titan: an image of just the arc at the top of a ring `radius` units out (`spread`, `thick` as [`arc_distance`]):
+/// its size in device pixels, how far from the ring's middle its own middle is (device pixels), and the shape.
+pub fn giant_arc(u: f32, radius: f32, spread: f32, thick: f32) -> (UVec2, f32, Vec<u8>) {
+    let r = rim(u);
+    let (outer, inner) = ((radius + PEAK) * u, (radius - thick) * u * spread.cos());
+    let mid = (outer + inner) / 2.;
+    let half = Vec2::new(outer * spread.sin() + thick * u + r + 2., (outer - inner) / 2. + r + 2.);
+    let size = (half * 2.).ceil().as_uvec2();
+    // (Drawn about the image's middle, which stands `mid` out from the ring's.)
+    let (w, h) = (size.x as f32, size.y as f32);
+    let mut data = vec![0u8; (size.x * size.y * 4) as usize];
+    let side = size.x.max(size.y);
+    let square = raster(side, r, |p| arc_distance_on(p - Vec2::new(0., mid), u, radius, spread, thick));
+    let (ox, oy) = ((side as f32 - w) / 2., (side as f32 - h) / 2.);
+    for y in 0..size.y {
+        for x in 0..size.x {
+            let (sx, sy) = ((x as f32 + ox) as u32, (y as f32 + oy) as u32);
+            let (from, to) = (((sy * side + sx) * 4) as usize, ((y * size.x + x) * 4) as usize);
+            data[to..to + 4].copy_from_slice(&square[from..from + 4]);
+        }
+    }
+    (size, mid, data)
+}
 
 /// The signed distance (device pixels; negative inside) from `p` (pixels from the middle, y down) to an arc at the top of
 /// the ring: `spread` radians either side of straight up, `thick` units thick in the middle and thinning to its ends,
 /// its outer edge pointing out PEAK at its middle.
 pub fn arc_distance(p: Vec2, u: f32, spread: f32, thick: f32) -> f32 {
+    arc_distance_on(p, u, RADIUS, spread, thick)
+}
+/// As [`arc_distance`], on a ring `radius` units out.
+pub fn arc_distance_on(p: Vec2, u: f32, radius: f32, spread: f32, thick: f32) -> f32 {
     let r = p.length();
     let phi = p.x.atan2(-p.y);
     let t = (phi.abs() / spread).min(1.);
-    let out = (RADIUS + PEAK * (1. - t)) * u;
+    let out = (radius + PEAK * (1. - t)) * u;
     let inner = out - thick * (1. - t * t).sqrt().max(0.3) * u;
     let across = (inner - r).max(r - out);
     let along = (phi.abs() - spread) * r;
@@ -562,8 +739,9 @@ fn image(images: &mut Assets<Image>, side: u32, data: Vec<u8>) -> Handle<Image> 
     images.add(Image::new(Extent3d { width: side, height: side, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default()))
 }
 
-/// The nodes for a window `s` (its height over SCALE) and `sf` (its scale factor).
-fn build(world: &mut World, s: f32, sf: f32) -> Ui {
+/// The nodes for a window `s` (its height over SCALE) and `sf` (its scale factor), the giant's ring `radius` logical
+/// pixels out.
+fn build(world: &mut World, s: f32, sf: f32, radius: f32) -> Ui {
     let u = unit(s, sf);
     let (big, small, large) = (ring_side(u), marker_side(u, false), marker_side(u, true));
     let r = rim(u);
@@ -599,7 +777,44 @@ fn build(world: &mut World, s: f32, sf: f32) -> Ui {
     let arcs = (0..ARCS).map(|_| node(world, big, &images[0])).collect();
     let ring = node(world, big, &images[2]);
     let marker = node(world, small, &images[3]);
-    Ui { root, arcs, ring, marker, edges, size: (s, sf), images, sides: [big as f32 / sf, small as f32 / sf, large as f32 / sf] }
+    // The giant's: on a ring `radius` out (in units of SCALE pixels), soft and weak-spot.
+    let units = radius / s.max(1e-3);
+    let made = [0, 1].map(|k| giant_arc(u, units, GIANT_SPREAD[k], GIANT_THICK[k]));
+    let giant_sizes = made.each_ref().map(|(size, ..)| size.as_vec2() / sf);
+    let giant_mid = made.each_ref().map(|(_, mid, _)| mid / sf);
+    let giant_images = world.resource_scope(|_, mut assets: Mut<Assets<Image>>| {
+        made.map(|(size, _, data)| assets.add(Image::new(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())))
+    });
+    let giant = (0..ARCS)
+        .map(|_| {
+            let e = world
+                .spawn((ImageNode::new(giant_images[0].clone()), Node { position_type: PositionType::Absolute, left: Val::Percent(50.), top: Val::Percent(50.), ..default() }, UiTransform::default(), Visibility::Hidden))
+                .id();
+            world.entity_mut(root).add_child(e);
+            e
+        })
+        .collect();
+    let icon_px = (18. * u).round() as u32;
+    let icon = world.resource_scope(|world, mut icons: Mut<crate::icons::Icons>| icons.get(&mut world.resource_mut::<Assets<Image>>(), crate::icons::Icon::Weak, icon_px));
+    let weak_icon = world
+        .spawn((ImageNode::new(icon).with_color(rgba(WEAK_RGB, 1.)), Node { position_type: PositionType::Absolute, left: Val::Percent(50.), top: Val::Percent(50.), ..default() }, Visibility::Hidden))
+        .id();
+    world.entity_mut(root).add_child(weak_icon);
+    Ui {
+        root,
+        arcs,
+        ring,
+        marker,
+        edges,
+        size: (s, sf, radius),
+        images,
+        sides: [big as f32 / sf, small as f32 / sf, large as f32 / sf],
+        giant,
+        giant_images,
+        giant_sizes,
+        giant_mid,
+        weak_icon,
+    }
 }
 
 fn rgba(c: [f32; 3], a: f32) -> Color {
@@ -614,7 +829,7 @@ fn show(world: &mut World, e: Entity, on: bool) {
 
 /// Puts what `hurt` holds on the screen for a player at `view` (its chest and yaw; None: dead or not in a round).
 fn draw(world: &mut World, hurt: &mut Hurt, view: Option<(Vec3, f32)>, now: f32) {
-    let busy = !hurt.arcs.is_empty() || hurt.ring.is_some() || hurt.marker.is_some();
+    let busy = !hurt.arcs.is_empty() || hurt.ring.is_some() || hurt.pulse.is_some() || hurt.marker.is_some();
     if view.is_none() || !busy {
         if let Some(ui) = &hurt.ui {
             let root = ui.root;
@@ -623,22 +838,73 @@ fn draw(world: &mut World, hurt: &mut Hurt, view: Option<(Vec3, f32)>, now: f32)
         return;
     }
     let (eye, yaw) = view.unwrap();
-    let (s, sf) = world.query::<&Window>().iter(world).next().map_or((1., 1.), |w| ((w.height() / crate::hud::SCALE).clamp(0.8, 4.), w.scale_factor()));
-    if hurt.ui.as_ref().is_none_or(|ui| (ui.size.0 - s).abs() > 1e-3 || (ui.size.1 - sf).abs() > 1e-3 || world.get_entity(ui.root).is_err()) {
+    let (s, sf, radius) = world
+        .query::<&Window>()
+        .iter(world)
+        .next()
+        .map_or((1., 1., giant_radius(1280., 720.)), |w| ((w.height() / crate::hud::SCALE).clamp(0.8, 4.), w.scale_factor(), giant_radius(w.width(), w.height())));
+    if hurt.ui.as_ref().is_none_or(|ui| (ui.size.0 - s).abs() > 1e-3 || (ui.size.1 - sf).abs() > 1e-3 || (ui.size.2 - radius).abs() > 0.5 || world.get_entity(ui.root).is_err()) {
         if let Some(old) = hurt.ui.take() {
             if let Ok(e) = world.get_entity_mut(old.root) {
                 e.despawn();
             }
         }
-        hurt.ui = Some(build(world, s, sf));
+        if !world.contains_resource::<crate::icons::Icons>() {
+            world.init_resource::<crate::icons::Icons>();
+        }
+        hurt.ui = Some(build(world, s, sf, radius));
     }
     let ui = hurt.ui.as_ref().unwrap();
     show(world, ui.root, true);
-    // The arcs, newest last (drawn on top).
+    // The arcs, newest last (drawn on top): round the crosshair, or the giant's out on its wide ring.
     let mut arcs: Vec<&Arc> = hurt.arcs.iter().collect();
     arcs.sort_by(|a, b| a.born.total_cmp(&b.born));
+    let giant = hurt.giant.is_some();
+    let mut icon = None;
+    for (k, &e) in ui.giant.iter().enumerate() {
+        let Some(arc) = arcs.get(k).filter(|_| giant) else {
+            show(world, e, false);
+            continue;
+        };
+        let kind = arc.weak as usize;
+        let (size, mid, theta) = (ui.giant_sizes[kind], ui.giant_mid[kind], arc.angle(eye, yaw));
+        let image = ui.giant_images[kind].clone();
+        if let Some(mut node) = world.get_mut::<ImageNode>(e) {
+            node.color = rgba(arc.tint, arc.giant_alpha(now));
+            if node.image != image {
+                node.image = image;
+            }
+        }
+        let at = Vec2::new(theta.sin(), -theta.cos()) * mid;
+        if let Some(mut node) = world.get_mut::<Node>(e) {
+            let margin = UiRect { left: Val::Px(at.x - size.x / 2.), top: Val::Px(at.y - size.y / 2.), ..default() };
+            if node.margin != margin || node.width != Val::Px(size.x) {
+                (node.width, node.height, node.margin) = (Val::Px(size.x), Val::Px(size.y), margin);
+            }
+        }
+        if let Some(mut t) = world.get_mut::<UiTransform>(e) {
+            t.rotation = Rot2::radians(theta);
+            t.scale = Vec2::splat(if arc.weak { pop(now - arc.popped).powi(2) } else { 1. });
+        }
+        show(world, e, true);
+        if arc.weak {
+            icon = Some((theta, mid, arc.giant_alpha(now)));
+        }
+    }
+    // The weak spot's icon just inside the newest weak-spot hit's cue.
+    if let Some((theta, mid, alpha)) = icon {
+        let side = 18. * s;
+        let at = Vec2::new(theta.sin(), -theta.cos()) * (mid - side * 1.3);
+        if let Some(mut node) = world.get_mut::<Node>(ui.weak_icon) {
+            (node.width, node.height, node.margin) = (Val::Px(side), Val::Px(side), UiRect { left: Val::Px(at.x - side / 2.), top: Val::Px(at.y - side / 2.), ..default() });
+        }
+        if let Some(mut node) = world.get_mut::<ImageNode>(ui.weak_icon) {
+            node.color = rgba(WEAK_RGB, alpha);
+        }
+    }
+    show(world, ui.weak_icon, icon.is_some());
     for (k, &e) in ui.arcs.iter().enumerate() {
-        let Some(arc) = arcs.get(k) else {
+        let Some(arc) = arcs.get(k).filter(|_| !giant) else {
             show(world, e, false);
             continue;
         };
@@ -866,6 +1132,106 @@ mod tests {
         assert_eq!(hurt.marker, Some((0.1, true)));
         hurt.age(&[], 0.1 + KILL);
         assert_eq!(hurt.marker, None);
+    }
+
+    #[test]
+    fn the_giant_sees_one_soft_cue_for_each_way_its_hits_come_from_as_heavy_as_its_share_and_no_red_edges() {
+        let max = 41_000.;
+        let mut hurt = Hurt { giant: Some(max), ..default() };
+        // Five small hotdogs round its feet, all ahead of it, each firing: one cue, not five, and the edges stay clear.
+        for (k, id) in (2..7).enumerate() {
+            let at = EYE + Vec3::new(-0.2 + 0.1 * k as f32, 0., -1.2);
+            hurt.giant_hit(&shot(at, id, 1., 36.), EYE, 0.01 * k as f32, max);
+        }
+        assert_eq!(hurt.arcs.len(), 1, "{:?}", hurt.arcs.iter().map(|a| a.key).collect::<Vec<_>>());
+        assert!(hurt.edges(EYE, 0., 0.05).iter().all(|(_, a)| *a == 0.), "no flash for ordinary rounds");
+        // Five rounds of a pistol are a sliver of 41,000: a faint cue. A hotdog's for the same is far stronger.
+        let soft = &hurt.arcs[0];
+        assert!(soft.giant_alpha(0.05) < 0.3 && soft.wide && !soft.weak, "{}", soft.giant_alpha(0.05));
+        let mut small = Hurt::default();
+        for id in 2..7 {
+            small.hit(&shot(EYE + Vec3::NEG_Z, id, 1., 36.), EYE, 0.);
+        }
+        assert!(small.arcs.len() == 5 && small.edges(EYE, 0., 0.05).iter().any(|(_, a)| *a > 0.2), "a hotdog's feedback is as it was");
+        // A heavy share (3% of its health within a moment) is a full cue; from behind it is a second one.
+        hurt.giant_hit(&shot(EYE + Vec3::new(0., 0., -1.2), 2, 1., max * GIANT_SHARE), EYE, 0.06, max);
+        assert!((hurt.arcs[0].weight() - 1.).abs() < 1e-3);
+        hurt.giant_hit(&shot(EYE + Vec3::Z * 1.5, 3, 1., 36.), EYE, 0.07, max);
+        assert_eq!(hurt.arcs.len(), 2);
+        // From every way round at once: never more cues than ARCS, none of them following anyone.
+        for k in 0..16 {
+            let a = k as f32 * TAU / 16.;
+            hurt.giant_hit(&shot(EYE + Vec3::new(a.sin(), 0., a.cos()) * 1.5, 2 + k, 1., 36.), EYE, 0.1, max);
+        }
+        assert!(hurt.arcs.len() <= ARCS && hurt.arcs.iter().all(|a| a.follow == 0 && !a.weak));
+        // A fall has no way to point: nothing, and no ring over the crosshair.
+        hurt.giant_hit(&Damage { kind: feast::FALL, amount: 500., time: 1., ..default() }, EYE, 0.2, max);
+        assert!(hurt.ring.is_none());
+    }
+
+    #[test]
+    fn a_weak_spot_hit_on_the_giant_is_gold_points_at_the_shooter_and_flashes_that_edge_and_a_stagger_pulses_them_all() {
+        let mut hurt = Hurt { giant: Some(41_000.), ..default() };
+        let behind = EYE + Vec3::Z * 1.4;
+        hurt.weak_hit(4, behind, EYE, 0., 300.);
+        let arc = &hurt.arcs[0];
+        assert!(arc.weak && arc.tint == WEAK_RGB && arc.follow == 4 && arc.giant_alpha(0.) == 1.);
+        assert!((arc.angle(EYE, 0.).abs() - PI).abs() < 1e-3, "behind is the bottom of the screen");
+        // Its edge (the bottom: behind) flashes gold; the others hardly.
+        let [top, right, bottom, left] = hurt.edges(EYE, 0., 0.05);
+        assert!(bottom.1 > 0.2 && bottom.0 == WEAK_RGB, "{bottom:?}");
+        assert!(top.1 < 0.01 && right.1 < 0.01 && left.1 < 0.01);
+        // The shooter moves: its cue follows it.
+        let mut shooter = hotdog(4);
+        shooter.p = [EYE.x + 1.4, 0.9025, EYE.z];
+        hurt.age(&[shooter], 0.1);
+        assert!((hurt.arcs[0].angle(EYE, 0.) - PI / 2.).abs() < 0.1, "now to the right");
+        // A stagger: every edge, once, amber.
+        let mut calm = Hurt { giant: Some(41_000.), ..default() };
+        calm.stagger(1.);
+        let edges = calm.edges(EYE, 0., 1.05);
+        assert!(edges.iter().all(|(c, a)| *a > 0.2 && *c == STAGGER_RGB));
+        calm.age(&[], 1. + FLASH);
+        assert!(calm.pulse.is_none() && calm.edges(EYE, 0., 1. + FLASH).iter().all(|(_, a)| *a == 0.));
+    }
+
+    #[test]
+    fn the_giant_hears_each_weak_spot_hit_and_stagger_once_and_again_next_round() {
+        use kitchen_sim::titan::{Event as TitanEvent, EventKind, View};
+        let mut view = View { titan: 1, max: 41_000., ..default() };
+        let shooter = Player { id: 3, p: [1., 0.9025, 2.], alive: true, ..default() };
+        view.events = vec![
+            TitanEvent { id: 1, kind: Some(EventKind::Hit), by: 3, to: 1, amount: 36., ..default() },
+            TitanEvent { id: 2, kind: Some(EventKind::WeakHit), by: 3, to: 1, amount: 120., ..default() },
+            TitanEvent { id: 3, kind: Some(EventKind::StaggerStart), ..default() },
+        ];
+        let mut told = 0;
+        let news = giant_heard(&mut told, &view, std::slice::from_ref(&shooter));
+        assert_eq!(news, vec![GiantNews::Weak { by: 3, from: chest(&shooter), amount: 120. }, GiantNews::Stagger]);
+        assert!(giant_heard(&mut told, &view, &[]).is_empty(), "once");
+        // A new round numbers them afresh.
+        view.events = vec![TitanEvent { id: 1, kind: Some(EventKind::WeakHit), by: 3, to: 1, amount: 50., ..default() }];
+        assert_eq!(giant_heard(&mut told, &view, &[]).len(), 1);
+    }
+
+    #[test]
+    fn the_giants_cues_stand_clear_of_the_crosshair_and_of_the_giant_in_its_third_person() {
+        // On a 1280 by 720 window the ring is 259 pixels out; a cue's inside edge is well clear of the crosshair's ring
+        // and of the giant, whom its third person frames within about 140 pixels of the middle across and 190 down.
+        let radius = giant_radius(1280., 720.);
+        assert!((radius - 259.2).abs() < 0.1);
+        for k in 0..2 {
+            let (size, mid, data) = giant_arc(1., radius, GIANT_SPREAD[k], GIANT_THICK[k]);
+            assert_eq!(data.len(), (size.x * size.y * 4) as usize);
+            let inner = mid - size.y as f32 / 2.;
+            assert!(inner > RADIUS * 2.5 && inner > 200., "{inner}");
+            assert!(size.x < 240 && size.y < 60, "a cue, not a ring: {size}");
+            // Its middle row is drawn (the arc is in the image).
+            let row = (size.y / 2) as usize;
+            assert!((0..size.x as usize).any(|x| data[(row * size.x as usize + x) * 4 + 3] > 200));
+        }
+        // On a phone held upright, inside the narrow side.
+        assert!(giant_radius(390., 844.) + 30. < 195.);
     }
 
     /// The shapes: an arc is drawn at the top of its square and nowhere else, white with a dark rim; the marker's ticks

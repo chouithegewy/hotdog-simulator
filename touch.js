@@ -28,7 +28,7 @@
 /** The buttons, as the game numbers them (src/touch.rs). */
 export const BUTTON={FIRE:1,JUMP:2,MELEE:4,CROUCH:8,PRONE:16,STIM:32,SWAP:64,PRIMARY:128,SECONDARY:256,USE:512,CARRY:1024,READY:2048,SCOPE:4096,ROUND:8192,HINTS:16384};
 /** What the game says this player can do (src/touch.rs `can`). */
-export const CAN={PLAY:1,ALIVE:2,BUILD:4,READY:8,SNIPER:16,SCOPED:32,CARRY:64,BACON:128,GRASP:256,PICKUP:512,FAMINE:1024,EAT:2048,PRONE:4096,CROUCH:8192,PRIMARY:16384,SECONDARY:32768,SECOND:65536,STIM:131072,STIM_WAIT:262144,OVER:524288,WATCH:1048576,LOBBY:2097152,TABLE:4194304,GO:8388608,PICK:16777216,HINTS:33554432,HINTS_ON:67108864,SWITCH:134217728,FIGHT:268435456,CHI:536870912,REPLAY:1073741824};
+export const CAN={PLAY:1,ALIVE:2,BUILD:4,READY:8,SNIPER:16,SCOPED:32,CARRY:64,BACON:128,GRASP:256,PICKUP:512,FAMINE:1024,EAT:2048,PRONE:4096,CROUCH:8192,PRIMARY:16384,SECONDARY:32768,SECOND:65536,STIM:131072,STIM_WAIT:262144,OVER:524288,WATCH:1048576,LOBBY:2097152,TABLE:4194304,GO:8388608,PICK:16777216,HINTS:33554432,HINTS_ON:67108864,SWITCH:134217728,FIGHT:268435456,CHI:536870912,REPLAY:1073741824,GIANT:2147483648};
 /** Where a touch belongs to the page, not to the controls: its buttons and boxes, the lobby, the menus, and the sandbox's badge and tuning panel (tune.js). */
 export const OWN='a,button,input,select,textarea,label,.lobby,.touch-menu,.touch-bar,.touch-show,.touch-replay,.replay-note,.mission,.chat.open,.chat-form,.error,.tune';
 /** The stick's reach in CSS pixels, and the share of it that does nothing (a resting thumb). */
@@ -48,6 +48,9 @@ export function shown(state,latched=false){const has=bit=>(state&bit)!==0,out=[]
  if(has(CAN.LOBBY)||!has(CAN.PLAY)){if(has(CAN.OVER))out.push(['ROUND','New round','wide']);return out}
  if(!has(CAN.ALIVE)){if(has(CAN.WATCH))out.push(['FIRE','Next','']);return out}
  // Kung Fu: hands and feet. Each button presses its Kung Fu action's key (src/touch.rs FU_KEYS); Style takes the next style.
+ // Titan, as the giant: its moves. Each button presses its titan action's key (src/touch.rs TITAN_KEYS); Charge dims while it cools down.
+ if(has(CAN.GIANT)){out.push(['FIRE','Swat',''],['SCOPE','Smash',''],['MELEE','Stomp',''],['JUMP','Jump',''],['CROUCH','Crouch',has(CAN.CROUCH)||latched?'on':''],['STIM','Charge',has(CAN.STIM_WAIT)?'dim':''])
+  if(has(CAN.HINTS))out.push(['HINTS',has(CAN.HINTS_ON)?'Hide hints':'Hints','wide'+(has(CAN.HINTS_ON)?'':' dim')]);return out}
  if(has(CAN.FIGHT)){out.push(['FIRE','Punch',''],['SCOPE','Heavy',''],['MELEE','Kick',''],['JUMP','Jump',''],['CROUCH','Crouch',has(CAN.CROUCH)||latched?'on':''],['CARRY','Block',''],['USE','Grab',''],['STIM','Dodge',''],['PRONE','Special',has(CAN.CHI)?'on':'dim'],['SWAP','Style',''])
   if(has(CAN.HINTS))out.push(['HINTS',has(CAN.HINTS_ON)?'Hide hints':'Hints','wide'+(has(CAN.HINTS_ON)?'':' dim')]);return out}
  const laden=has(CAN.CARRY)||has(CAN.BACON),locked=has(CAN.BUILD)&&!has(CAN.CARRY);

@@ -7,7 +7,7 @@ import {MARKER,FOOTPRINT,FIXED,KIT_NAME,itemBox,reach} from './model.js';
 // The materials, then the appliances and the things that stand on the counter (each in the colour it mostly is: a red enamel kettle, a yellow box of cereal…).
 export const STYLE={steel:'#aab6ba',stone:'#8e918a',wood:'#c2935a',dark:'#3d4447',white:'#f3f2ec',red:'#c8402c',green:'#5d9447',yellow:'#e9b824',metal:'#8ea0a8',microwave:'#5b676e',toaster:'#cdd2d3',
   kettle:'#c4412e','knife-block':'#bd8a54',canister:'#e6e0d2',jar:'#cfe3e8',cereal:'#e8a317','paper-towel':'#f6f4ee','dish-rack':'#d9dcda','spice-rack':'#6b4428','fruit-bowl':'#3a8f8a',faucet:'#c3cbd0',griddle:'#4b5256',
-  bamboo:'#d8bf7e',gong:'#2b2e30'};
+  bamboo:'#d8bf7e',gong:'#2b2e30',card:'#b88a55',fridge:'#c9cfcf',oven:'#3a3e40','pet-bowl':'#b4bec3'};
 // A sink: its steel flange and basin, the basin's dark depths and the drain.
 const SINK={rim:'#b9c2c6',edge:'#6f7c82',light:'#75828a',deep:'#323c40',drain:'#a3adb2',hole:'#11171a'};
 // A pedal bin: brushed steel, black base, lid hinge and pedal.
@@ -30,6 +30,8 @@ export const TEAM_COLOR={mustard:'#e0b020',ketchup:'#c8281e'},TEAM_LABEL={mustar
 /** What a zone is called: "Mustard base", "Forcefield", "Bacon". */
 export const zoneName=zone=>zone.kind==='base'?`${TEAM_LABEL[zone.team]??'Team'} base`:zone.kind==='field'?'Forcefield':'Bacon';
 const INK='#18242a',SELECT='#1f5fbf',KETCHUP='#c4321c',MUSTARD='#f0b323',COUNTER='#e9e4d4',UNDER='#283233',RULER=20;
+// A map whose ground is the kitchen floor (`floor`): 30 cm tiles and their grout.
+const TILE='#cfc6b2',GROUT='#a89f8b',TILE_SIZE=.3;
 const FONT='"Barlow Semi Condensed","Arial Narrow",sans-serif';
 const shade=(hex,amount)=>{
   const n=parseInt(hex.slice(1),16),mix=c=>Math.round(amount<0?c*(1+amount):c+(255-c)*amount);
@@ -112,7 +114,14 @@ export class View {
     ctx.fillStyle=UNDER;ctx.fillRect(0,0,w,h);
     const ax=this.sx(b[0]),az=this.sy(b[1]),aw=(b[2]-b[0])*this.scale,ah=(b[3]-b[1])*this.scale;
     ctx.fillStyle='#0005';ctx.fillRect(ax+3,az+5,aw,ah);
-    ctx.fillStyle=COUNTER;ctx.fillRect(ax,az,aw,ah);
+    ctx.fillStyle=map.floor?TILE:COUNTER;ctx.fillRect(ax,az,aw,ah);
+    if(map.floor&&TILE_SIZE*this.scale>=6){
+      // The kitchen floor's tiles, from the room's corner.
+      ctx.strokeStyle=GROUT;ctx.lineWidth=1;ctx.beginPath();
+      for(let x=b[0]+TILE_SIZE;x<b[2]-1e-6;x+=TILE_SIZE){ctx.moveTo(this.sx(x),az);ctx.lineTo(this.sx(x),az+ah)}
+      for(let z=b[1]+TILE_SIZE;z<b[3]-1e-6;z+=TILE_SIZE){ctx.moveTo(ax,this.sy(z));ctx.lineTo(ax+aw,this.sy(z))}
+      ctx.stroke();
+    }
     const selected=new Set(scene.selection),visible=rect=>this.sx(rect[2])>=-40&&this.sx(rect[0])<=w+40&&this.sy(rect[3])>=-40&&this.sy(rect[1])<=h+40;
     // A sink is a hole in the counter, under everything, and under the overlays, which say what its floor is like.
     for(const sink of map.sinks??[])if(visible(sink.rect))this.#sink(sink);
@@ -431,6 +440,36 @@ export class View {
         ctx.fillStyle=BITS.black;ctx.fillRect(-W/2+px,-D/2+py,W-2*px,Math.max(1.5,.008*s));
         bar(-W*.3,D/2,-W*.3,D/2+.05*s,Math.max(1.2,.006*s),BITS.black);
         disc(0,-D/2+.009*s,Math.max(2,.011*s),BITS.black,BITS.steel,Math.max(1,.003*s));disc(.05*s,-D/2+.009*s,Math.max(1.5,.005*s),'#e2512e');
+        break;
+      }
+      case 'fridge':{
+        // A fridge from above: its body, the door across the front (up the screen) standing a little ajar from its hinge on the left, the light inside
+        // spilling out of the gap, and the handle by the opening edge.
+        ctx.fillStyle=colour;ctx.fillRect(-W/2,-D/2+.07*s,W,D-.07*s);
+        ctx.strokeStyle=edge;ctx.lineWidth=1.5;ctx.strokeRect(-W/2,-D/2+.07*s,W,D-.07*s);
+        ctx.save();ctx.translate(-W/2,-D/2+.07*s);ctx.rotate(-.21);
+        ctx.fillStyle='#fff6d8aa';ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(W,0);ctx.lineTo(W*1.05,-D*.5);ctx.closePath();ctx.fill();
+        ctx.fillStyle=shade(colour,.15);ctx.fillRect(0,-.07*s,W,.07*s);ctx.strokeStyle=edge;ctx.strokeRect(0,-.07*s,W,.07*s);
+        bar(W*.9,-.075*s,W*.9,-.11*s,Math.max(1.5,.02*s),BITS.steel);
+        ctx.restore();
+        break;
+      }
+      case 'oven':{
+        // A freestanding range from above: four burners on the hob, the backguard with its clock along the back, the knobs and the oven door's handle along
+        // the front (up the screen).
+        ctx.fillStyle=colour;ctx.fillRect(-W/2,-D/2,W,D);
+        ctx.fillStyle=shade(colour,.2);ctx.fillRect(-W/2,D/2-.06*s,W,.06*s);
+        disc(0,D/2-.03*s,Math.max(1.5,.012*s),'#53e08a');
+        const r=Math.min(W*.18,D*.17);
+        for(const [bx,bz] of [[-.24,-.17],[.24,-.17],[-.24,.17],[.24,.17]])disc(bx*W,bz*D,r,'#1b1d1e','#8b9294',Math.max(1,.006*s));
+        bar(-W*.4,-D/2+.01*s,W*.4,-D/2+.01*s,Math.max(1.5,.014*s),BITS.steel);
+        for(const kx of [-.36,-.18,.18,.36])disc(kx*W,-D/2+.035*s,Math.max(1.5,.015*s),BITS.black,BITS.steel);
+        break;
+      }
+      case 'pet-bowl':{
+        // A pet's steel bowl from above: its wide foot, the rim, and kibble in it.
+        disc(0,0,n*.5,colour,edge,1.5);disc(0,0,n*.38,shade(colour,.25),shade(colour,-.3));
+        for(const [fx,fz] of [[-.12,.08],[.1,.12],[.02,-.1],[.15,-.06],[-.1,-.12],[0,.02]])disc(fx*n,fz*n,Math.max(1,n*.05),'#8a5a2b');
         break;
       }
       default:{

@@ -283,43 +283,63 @@ fn every_gun_mode_starts_on_every_map_it_says_it_can_be_played_on_and_says_why_i
         let made = Mode::made_for(&map);
         for mode in Mode::GUNS {
             let refused = map.refuses(mode);
-            // Free For All and the siege on every map but the dojo; Forts on the maps with its layout (the Forts maps).
-            let expected = !dojo && (mode != Mode::Forts || made == Mode::Forts);
+            // Free For All and the siege on every map but the dojo; Forts on the maps with its layout (the Forts maps);
+            // Titan on the maps with its layout (the titan arena, which the other gun modes but Forts play too).
+            let expected = !dojo
+                && match mode {
+                    Mode::Forts => made == Mode::Forts,
+                    Mode::Titan => made == Mode::Titan,
+                    _ => true,
+                };
             assert_eq!(refused.is_none(), expected, "{name} as {mode:?}: {refused:?}");
             table.push((name.clone(), mode, refused.is_none()));
             let Some(why) = refused else {
                 let mut s = game_on(map.clone(), Some(mode));
                 assert_eq!(s.mode(), mode, "{name}");
-                assert_eq!(s.players.len(), if mode == Mode::Forts { FORT_PLAYERS } else { 5 }, "{name} as {mode:?}");
-                assert_eq!(s.fort.is_some(), mode == Mode::Forts, "{name} as {mode:?}");
+                let seats = match mode {
+                    Mode::Forts => FORT_PLAYERS,
+                    Mode::Titan => 1 + crate::titan::SMALLS,
+                    _ => 5,
+                };
+                assert_eq!(s.players.len(), seats, "{name} as {mode:?}");
+                assert_eq!((s.fort.is_some(), s.titan.is_some()), (mode == Mode::Forts, mode == Mode::Titan), "{name} as {mode:?}");
                 let first = match mode {
                     Mode::Forts => Stage::Build,
-                    Mode::Ffa => Stage::FreeForAll,
+                    Mode::Ffa | Mode::Titan => Stage::FreeForAll,
                     _ => Stage::Warmup,
                 };
                 assert_eq!(s.stage, first, "{name} as {mode:?}");
-                assert!(s.players.iter().all(loaded), "{name} as {mode:?}");
+                // (Every hotdog with the gun basics: the titan, which holds no gun, aside.)
+                assert!(s.players.iter().filter(|p| !s.is_titan(p.id)).all(loaded), "{name} as {mode:?}");
                 // It plays: a few seconds, and the next round is the same mode.
                 run(&mut s, 3.);
                 s.reset();
-                assert_eq!((s.mode(), s.fort.is_some()), (mode, mode == Mode::Forts), "{name} as {mode:?}, next round");
+                assert_eq!((s.mode(), s.fort.is_some(), s.titan.is_some()), (mode, mode == Mode::Forts, mode == Mode::Titan), "{name} as {mode:?}, next round");
+                assert_eq!(s.players.len(), seats, "{name} as {mode:?}, next round");
                 continue;
             };
             assert!(why.starts_with(&map.name), "{why}");
-            assert!(why.contains(if dojo { "Kung Fu" } else { "Forts layout" }), "{why}");
+            let reason = match mode {
+                _ if dojo => "Kung Fu",
+                Mode::Titan => "Titan layout",
+                _ => "Forts layout",
+            };
+            assert!(why.contains(reason), "{why}");
         }
         // The dojo is Kung Fu's.
         assert_eq!(map.refuses(Mode::KungFu).is_none(), dojo, "{name}");
+        // A map played with no mode named plays its own: the titan arena Titan.
+        assert_eq!(game_on(map.clone(), None).mode(), made, "{name}");
     }
-    // Thirteen gun maps, four of them with the Forts layout.
+    // Fourteen gun maps, four of them with the Forts layout and one with Titan's (Titan's Kitchen).
     let count = |mode: Mode| table.iter().filter(|(_, m, ok)| *m == mode && *ok).count();
-    assert_eq!((count(Mode::Siege), count(Mode::Ffa), count(Mode::Forts)), (13, 13, 4), "{table:?}");
+    assert_eq!((count(Mode::Siege), count(Mode::Ffa), count(Mode::Forts), count(Mode::Titan)), (14, 14, 4, 1), "{table:?}");
 }
 
 #[test]
 fn the_mode_is_the_games_and_a_maps_tag_only_says_which_it_plays_when_nothing_else_does() {
     // The rules name the siege and Forts as they name the rest, and write them back.
-    for (line, mode) in [("mode=siege", Mode::Siege), ("mode=forts", Mode::Forts), ("mode=ffa", Mode::Ffa), ("mode=cards", Mode::Cards), ("mode=kungfu", Mode::KungFu)] {
+    for (line, mode) in [("mode=siege", Mode::Siege), ("mode=forts", Mode::Forts), ("mode=ffa", Mode::Ffa), ("mode=cards", Mode::Cards), ("mode=kungfu", Mode::KungFu), ("mode=titan", Mode::Titan)] {
         let r = Rules::parse(line);
         assert_eq!((r.mode(), r.text().as_str()), (Some(mode), line));
         assert_eq!(Rules::parse(&r.text()), r);

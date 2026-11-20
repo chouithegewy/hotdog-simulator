@@ -20,6 +20,7 @@ pub mod pov;
 pub mod replay;
 pub mod rules;
 pub mod spawns;
+pub mod titan;
 pub mod tune;
 use glam::{Vec2, Vec3};
 use std::{cmp::Ordering, collections::BinaryHeap};

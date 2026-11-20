@@ -76,6 +76,8 @@ pub const KS_MODE_FORTS: u32 = 1;
 pub const KS_MODE_FFA: u32 = 2;
 pub const KS_MODE_KUNGFU: u32 = 3;
 pub const KS_MODE_CARDS: u32 = 4;
+/// Titan (kitchen_sim::titan): one giant hotdog against the rest.
+pub const KS_MODE_TITAN: u32 = 5;
 
 /// `KsMatch::stage`, as net::STAGES numbers them (Lobby and Opening only online, from the server's lobby).
 pub const KS_STAGE_LOBBY: u32 = 0;

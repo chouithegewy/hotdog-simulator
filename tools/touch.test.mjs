@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 David Nunes-Childs
-// The touch controls' own sums (touch.js): how far the stick is pushed, and which buttons a state shows.
+// The touch controls' own sums (touch.js): how far the stick is pushed, which buttons a state shows, and a replay's bar
+// and gestures.
 //   node --test tools/touch.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -138,4 +139,16 @@ test('two fingers fly as a stick from where they landed and pinch by how much fu
 
 test('a tap on the picture is short and stays where it landed; anything else is a look', ()=>{
  assert.ok(tapped(120,2,3));assert.ok(!tapped(600,0,0),'held');assert.ok(!tapped(120,30,0),'dragged');
+});
+
+test('Titan: as the giant the buttons are its moves, the charge dimmed while it cools down, and nothing of the guns, the stim or carrying', ()=>{
+ const giant=CAN.PLAY|CAN.ALIVE|CAN.GIANT;
+ assert.equal(CAN.GIANT,2**31,'as src/touch.rs numbers it (1 << 31)');
+ assert.deepEqual(shown(giant).map(([name,label])=>`${name}:${label}`),['FIRE:Swat','SCOPE:Smash','MELEE:Stomp','JUMP:Jump','CROUCH:Crouch','STIM:Charge']);
+ assert.equal(shown(giant|CAN.STIM_WAIT).find(([name])=>name==='STIM')[2],'dim');
+ assert.equal(shown(giant|CAN.CROUCH).find(([name])=>name==='CROUCH')[2],'on');
+ // The bit survives the page's 32-bit arithmetic, and a small hotdog keeps the gun basics.
+ assert.ok(shown((giant|0)>>>0).some(([name])=>name==='MELEE'));
+ assert.ok(shown(CAN.PLAY|CAN.ALIVE|CAN.SNIPER).some(([,label])=>label==='Fire'));
+ assert.ok(!shown(CAN.PLAY|CAN.GIANT).some(([,label])=>label==='Swat'),'dead, none of them');
 });

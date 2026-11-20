@@ -19,7 +19,8 @@ export const FIXED={bin:[.17,.15]};
 const footprintOf=item=>FOOTPRINT[item.kind]??FIXED[item.kind];
 /** What each block style among KITS is called in the panel and on the plan. */
 export const KIT_NAME={microwave:'Microwave',toaster:'Toaster',kettle:'Kettle','knife-block':'Knife block',canister:'Canister',jar:'Jar',cereal:'Cereal box',
-  'paper-towel':'Paper towels','dish-rack':'Dish rack','spice-rack':'Spice rack','fruit-bowl':'Fruit bowl',faucet:'Tap',griddle:'Electric griddle',gong:'Wok gong'};
+  'paper-towel':'Paper towels','dish-rack':'Dish rack','spice-rack':'Spice rack','fruit-bowl':'Fruit bowl',faucet:'Tap',griddle:'Electric griddle',gong:'Wok gong',
+  fridge:'Fridge',oven:'Oven','pet-bowl':'Pet bowl'};
 /** The sink whose basin holds the point [x, z] on the plan, or null. */
 export const sinkAt=(map,x,z)=>(map.sinks??[]).find(({rect:r})=>x>=r[0]&&x<=r[2]&&z>=r[1]&&z<=r[3])??null;
 /// How far a point object reaches from its position: loose objects are bigger than a marker.
@@ -47,7 +48,7 @@ const same=(a,b)=>{
   const keys=Object.keys(a);
   return keys.length===Object.keys(b).length&&keys.every(key=>same(a[key],b[key]));
 };
-const sameMap=(a,b)=>a===b||(a.name===b.name&&a.theme===b.theme&&a.mode===b.mode&&a.build===b.build&&same(a.respawn,b.respawn)&&!!a.cabinets===!!b.cabinets&&same(a.bounds,b.bounds)&&same(a.nav,b.nav)&&KINDS.every(kind=>same(a[kind],b[kind])));
+const sameMap=(a,b)=>a===b||(a.name===b.name&&a.theme===b.theme&&a.mode===b.mode&&a.build===b.build&&same(a.respawn,b.respawn)&&!!a.cabinets===!!b.cabinets&&!!a.floor===!!b.floor&&same(a.bounds,b.bounds)&&same(a.nav,b.nav)&&KINDS.every(kind=>same(a[kind],b[kind])));
 const refuse=error=>{if(error instanceof MapError)return {ok:false,error:error.message};throw error};
 const label=(kind,index)=>`${LABELS[kind]} ${index+1}`;
 // "Ramp 1.height must be…" reads better as "Ramp 1 height must be…".
@@ -398,7 +399,7 @@ export class Doc {
   setSettings(patch){
     return this.apply(map=>{
       const next={...map,name:patch.name??map.name,theme:patch.theme??map.theme,mode:patch.mode??map.mode,build:patch.build??map.build,
-        respawn:patch.respawn===undefined?map.respawn:patch.respawn,cabinets:patch.cabinets??map.cabinets,bounds:patch.bounds??map.bounds,nav:patch.nav?{...map.nav,...patch.nav}:map.nav};
+        respawn:patch.respawn===undefined?map.respawn:patch.respawn,cabinets:patch.cabinets??map.cabinets,floor:patch.floor??map.floor,bounds:patch.bounds??map.bounds,nav:patch.nav?{...map.nav,...patch.nav}:map.nav};
       return next.mode==='forts'&&map.mode!=='forts'?fortified(next):next;
     });
   }

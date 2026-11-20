@@ -24,6 +24,11 @@
 //!   a hotdog (`cards`), and only for their own seat. Each game's table is shuffled differently (`with_rules`).
 //! - **Kung Fu** (kitchen_sim::kungfu) is played through the lobby as Free For All is; a person's command goes whole to
 //!   `Feast::kungfu_command`, the same function single player calls (`command`).
+//! - **Titan** (kitchen_sim::titan) is played through the lobby as a siege is (somebody arriving during a round waits for
+//!   the next). Who is the titan is the lobby's choice (`titan`: a bot, a person drawn, a person named), cast afresh as
+//!   each round is set out once the seats say who is a person (`cast`), by turns between rounds; the seat cast is
+//!   written into the rules the frames carry (`titan=<id>`), so every client agrees. The titan's command goes whole to
+//!   `Feast::titan_command`; the small hotdogs' as in every gun mode.
 use kitchen_sim::cards;
 use kitchen_sim::feast::{Feast, NAMES, Player, Stage};
 use kitchen_sim::forts;
@@ -128,6 +133,8 @@ pub struct Game {
     /// Whether there is a lobby (there is, unless the server plays the demo).
     lobby: bool,
     demo: bool,
+    /// Titan: who is to be the titan in the rounds to come (the lobby's choice; a seat for a person named).
+    pub titan: kitchen_sim::titan::Pick,
 }
 
 impl Game {
@@ -169,10 +176,13 @@ impl Game {
             pause: [settings.countdown, settings.opening],
             lobby,
             demo: settings.demo,
+            titan: Default::default(),
         };
         // Nobody has joined: every hotdog is a bot.
         let keep = game.keep();
         game.refit(&keep, None);
+        game.titan = game.feast.rules.pick;
+        game.cast();
         if game.lobby {
             game.park();
         }
@@ -331,6 +341,20 @@ impl Game {
         let keep = self.keep();
         self.feast.reset();
         self.refit(&keep, teams);
+        self.cast();
+    }
+    /// Titan: the round's titan cast by the lobby's choice now that the seats say who is a person (kitchen_sim
+    /// `Feast::cast_titan`, by turns from the last round's), and the seat cast written into the rules the frames carry.
+    pub fn cast(&mut self) {
+        if self.feast.titan.is_none() {
+            return;
+        }
+        self.feast.rules.pick = self.titan;
+        self.feast.cast_titan();
+        if let Some(id) = self.feast.titan_id() {
+            self.feast.rules.pick = kitchen_sim::titan::Pick::Seat(id);
+        }
+        self.dress();
     }
 
     // ----- The lobby's stages.
@@ -482,6 +506,9 @@ impl Game {
                     let rank = self.feast.players.iter().filter(|q| q.team == team && q.id < id).count();
                     forts::NAMES[team.min(1) as usize][rank % 3].to_string()
                 }
+                // (Titan: the titan's bot is the titan, and there are more small hotdogs than names of a siege.)
+                None if self.feast.is_titan(id) => kitchen_sim::titan::NAME.to_string(),
+                None if self.feast.titan.is_some() => kitchen_sim::titan::SMALL_NAMES[i % kitchen_sim::titan::SMALL_NAMES.len()].to_string(),
                 None => NAMES[i % NAMES.len()].to_string(),
             };
             seat.color = mine.map_or(BARE.into(), |profile| profile.color.clone());
@@ -512,6 +539,7 @@ impl Game {
             // The round set out the next by itself: after a siege round, or between the rounds of a Forts match. After
             // the round, or the match, everyone goes back to the fridge.
             self.refit(&keep, None);
+            self.cast();
             if self.lobby && (self.feast.fort.is_none() || champion) {
                 self.park();
             }
@@ -608,6 +636,10 @@ impl Game {
         // (Not at the card table: the stances and the gun in hand are not gated there, and have no place at it.)
         if f.cards.is_some() || !f.player(id).is_some_and(|p| p.alive) {
             return;
+        }
+        // Titan: the titan's command is read whole, its own way (kitchen_sim::titan).
+        if f.is_titan(id) {
+            return f.titan_command(id, c, dt);
         }
         // Kung Fu: the simulation reads the whole command its own way, as single player does (kitchen_sim::kungfu).
         if f.kungfu.is_some() {

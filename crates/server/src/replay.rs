@@ -588,6 +588,88 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Titan (kitchen_sim::titan): a match of it records as any other, the titan's word among its texts, and its stats
+    /// stand (the titan's thousands of HP taken, the small hotdogs' damage dealt to it, the kills).
+    #[test]
+    fn a_titan_match_records_with_the_titans_word_and_its_stats() {
+        let dir = folder("titan");
+        let settings = Settings { demo: true, ..Settings::default() };
+        let map = Map::parse(&std::fs::read_to_string(format!("{ROOT}/assets/maps/titans-kitchen.json")).unwrap()).unwrap();
+        let game = Game::new(map, &settings);
+        let lobby = Lobby::new(game, settings, Options::new(Path::new(ROOT).join("assets/maps")));
+        let mut hub = Hub::new(lobby, Net::default());
+        hub.replays = Replays::new(dir.to_path_buf(), KEEP);
+        let (outbox, _inbox, _frames) = Outbox::memories();
+        hub.event(Event::Open { peer: 1, page: false, outbox });
+        hub.event(Event::Message { peer: 1, message: json!({"type": "join", "version": 12, "name": "Nell"}) });
+        for _ in 0..(60 * 40) {
+            if hub.advance() {
+                hub.send();
+            }
+        }
+        let id = hub.replays.recording().expect("recording");
+        let titan = hub.lobby.game.feast.titan_id().expect("a titan");
+        hub.event(Event::Closed { peer: 1 });
+        while !hub.advance() {}
+        hub.send();
+        let listed = list(&dir);
+        assert_eq!((listed[0].mode.as_str(), listed[0].map.as_str(), listed[0].players.len(), listed[0].complete), ("titan", "Titan's Kitchen", 6, true));
+        let replay = Replay::open(&path(&dir, &id).unwrap()).unwrap();
+        assert_eq!(replay.header.mode.as_str(), "titan");
+        assert!(replay.header.rules.contains("mode=titan"), "{}", replay.header.rules);
+        // The titan's word is among its texts, and reads back as the titan's view.
+        let (mut head, mut played) = Playhead::seek(&replay, 0).unwrap();
+        played.extend(head.advance(&replay, u32::MAX));
+        let views: Vec<kitchen_sim::titan::View> = played
+            .iter()
+            .filter_map(|p| match &p.record {
+                Record::Text(t) if kitchen_sim::replay::kind_of(t).as_deref() == Some("titan") => serde_json::from_str(t).ok(),
+                _ => None,
+            })
+            .collect();
+        assert!(views.len() > 10 && views.iter().all(|v| v.titan == titan), "{}", views.len());
+        // The stats: the titan took damage by the thousand, small hotdogs dealt it, and nothing overflowed.
+        let summary = replay.summary.as_ref().expect("finished");
+        let line = |id: u32| summary.lines.iter().find(|l| l.id == id).unwrap();
+        assert!(line(titan).taken > 100_000, "{:?}", line(titan));
+        let dealt: u64 = summary.lines.iter().filter(|l| l.id != titan).map(|l| l.dealt).sum();
+        assert!(dealt > 100_000 && dealt <= line(titan).taken + 1, "{dealt} {:?}", line(titan));
+        assert_eq!(summary.lines.len(), 6);
+        // A seek into the middle (the start of a chunk, where nothing of the chunk's own is played yet) has the titan
+        // as it stood there at once, from the chunk's context: its health, its move, the pool, as playing it through
+        // from the start had them.
+        assert!(kitchen_sim::replay::CONTEXT.contains(&"titan"));
+        assert!(replay.chunks.len() >= 4, "{}", replay.chunks.len());
+        for k in [replay.chunks.len() / 2, replay.chunks.len() - 2] {
+            let at = replay.chunks[k].start;
+            let linear: kitchen_sim::titan::View = played
+                .iter()
+                .filter(|p| p.ms <= at)
+                .filter_map(|p| match &p.record {
+                    Record::Text(t) if kitchen_sim::replay::kind_of(t).as_deref() == Some("titan") => serde_json::from_str(t).ok(),
+                    _ => None,
+                })
+                .last()
+                .unwrap();
+            let (_, sought) = Playhead::seek(&replay, at).unwrap();
+            let told: Vec<kitchen_sim::titan::View> = sought
+                .iter()
+                .filter_map(|p| match &p.record {
+                    Record::Text(t) if kitchen_sim::replay::kind_of(t).as_deref() == Some("titan") => serde_json::from_str(t).ok(),
+                    _ => None,
+                })
+                .collect();
+            let view = told.last().expect("the titan at once");
+            assert_eq!((view.hp, view.mv, view.started, view.reserve, view.pool), (linear.hp, linear.mv, linear.started, linear.reserve, linear.pool), "at {at} ms");
+            assert!(sought.iter().any(|p| p.context && matches!(&p.record, Record::Text(t) if t.contains("\"type\":\"titan\""))), "from the context");
+            // And it is the titan the frame there shows.
+            let frame = sought.iter().filter_map(|p| p.frame.as_ref()).last().expect("a frame");
+            let hp = frame.players.iter().find(|s| s.player.id == titan).unwrap().player.hp;
+            assert!((hp - view.hp).abs() < 1e-3, "{hp} {}", view.hp);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A player's own view as its client sends it: its header, and a batch of `n` frames at 60 a second ending at `to`
     /// (ms on the server's clock), each with a shot.
     fn header(player: u32) -> Value {

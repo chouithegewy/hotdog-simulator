@@ -59,6 +59,8 @@ pub struct Context {
     /// which each command's walk (`kungfu::pace`: none in a move) and lunge or dodge (`kungfu::lunge`) are foreseen;
     /// its PRONE is the special, not lying down. None in any other mode.
     pub kungfu: Option<crate::fight::Foresight>,
+    /// Titan, as the titan: its giant is foreseen as the server moves it (titan/predict.rs), not walked as a hotdog.
+    pub titan: Option<crate::titan::predict::Foresight>,
 }
 impl Predictor {
     /// Applies a command to the client's own body (in `ghosts`) as the server will (crates/server game.rs `command`):
@@ -66,7 +68,7 @@ impl Predictor {
     /// jump, the step. Keeps it, with the body after it. Returns where the body now stands, or None without one.
     pub fn step(&mut self, feast: &mut Feast, ghosts: &mut actor::World, c: &Command, ctx: &Context) -> Option<Vec3> {
         // (Kung Fu foresees a command's step from those before it: fight.rs.)
-        let before: Vec<Command> = if ctx.kungfu.is_some() { self.pending.iter().map(|(c, _)| *c).collect() } else { vec![] };
+        let before: Vec<Command> = if ctx.kungfu.is_some() || ctx.titan.is_some() { self.pending.iter().map(|(c, _)| *c).collect() } else { vec![] };
         let after = apply(feast, ghosts, c, ctx, &before, true)?;
         self.pending.push_back((*c, after.clone()));
         Some(after.position())
@@ -106,6 +108,12 @@ impl Predictor {
 /// `before` (oldest first: Kung Fu foresees the fighter from them); `props` says whether the props move in the step
 /// too. Returns the body afterwards.
 fn apply(feast: &mut Feast, ghosts: &mut actor::World, c: &Command, ctx: &Context, before: &[Command], props: bool) -> Option<Actor> {
+    // (The titan's giant goes as the server moves it: titan/predict.rs.)
+    if let Some(titan) = &ctx.titan {
+        let body = ghosts.get_mut(ctx.me)?;
+        titan.step(body, c, before, ctx.dt);
+        return Some(body.clone());
+    }
     let body = ghosts.get(ctx.me)?;
     let (prone, crouch) = (c.has(button::PRONE) && ctx.kungfu.is_none(), c.has(button::CROUCH) && (!c.has(button::PRONE) || ctx.kungfu.is_some()));
     let control = if body.launched { ghosts.config.control as f32 } else { 1. };
@@ -315,6 +323,9 @@ pub struct Online {
     pub heard: f64,
     /// Shots the clock has passed, for network.rs to show (the gun's bark, the kick, a turret's beam).
     pub shots: Vec<feast::Shot>,
+    /// Titan, as the titan: the walk its giant had as it last stood free (m/s, flat), which a jump takes off with
+    /// (titan/predict.rs; the server's word on the body in the air does not carry it).
+    pub titan_run_up: Vec2,
 }
 impl Default for Online {
     fn default() -> Online {
@@ -336,6 +347,7 @@ impl Default for Online {
             clock: (0, 0.),
             heard: 0.,
             shots: vec![],
+            titan_run_up: Vec2::ZERO,
         }
     }
 }
@@ -388,8 +400,9 @@ pub fn play(g: &mut Game, input: Input, frame_dt: f32) {
     let me = g.network_id;
     let roster = g.roster.iter().find(|p| p.id == me);
     let kungfu = g.fighter(me).map(|f| crate::fight::Foresight { fighter: f.clone(), clock: g.online.clock });
-    let ctx = Context { me, dt: g.online.dt(), stim: kungfu.is_none() && (roster.is_some_and(|p| p.stim > 0.) || g.online.stim > 0.), burden: crate::forts::burden(g), kungfu };
-    let (fu, fu_hold, fu_style) = (g.kung_fu(), g.fu_hold, g.fu_style);
+    let ctx = Context { me, dt: g.online.dt(), stim: kungfu.is_none() && (roster.is_some_and(|p| p.stim > 0.) || g.online.stim > 0.), burden: crate::forts::burden(g), kungfu, titan: crate::titan::predict::Foresight::of(g) };
+    // (The titan's moves go up as Kung Fu's do: their levels held in every command, `arena::titan_input`.)
+    let (fu, fu_hold, fu_style) = (g.kung_fu() || crate::titan::titan_id(g) == Some(me), g.fu_hold, g.fu_style);
     while g.online.acc >= ctx.dt {
         let o = &mut g.online;
         o.acc -= ctx.dt;
@@ -446,10 +459,13 @@ pub fn settle(g: &mut Game, ack: u32, mine: Option<Mine>) {
         return;
     };
     let kungfu = g.fighter(me).map(|f| crate::fight::Foresight { fighter: f.clone(), clock: g.online.clock });
-    let ctx = Context { me, dt: g.online.dt(), stim: kungfu.is_none() && (g.roster.iter().any(|p| p.id == me && p.stim > 0.) || g.online.stim > 0.), burden: crate::forts::burden(g), kungfu };
+    let ctx = Context { me, dt: g.online.dt(), stim: kungfu.is_none() && (g.roster.iter().any(|p| p.id == me && p.stim > 0.) || g.online.stim > 0.), burden: crate::forts::burden(g), kungfu, titan: crate::titan::predict::Foresight::of(g) };
     if g.ghosts.get(me).is_none() {
-        // A body to predict again: where the server has it, and nothing pending counts.
-        let mut body = Actor { radius: feast::HOTDOG_RADIUS, ..Actor::hotdog(me, [0.; 3]) };
+        // A body to predict again: where the server has it, and nothing pending counts. (The titan's is a giant's.)
+        let mut body = match crate::titan::ghost_of(g, me) {
+            Some(giant) => giant,
+            None => Actor { radius: feast::HOTDOG_RADIUS, ..Actor::hotdog(me, [0.; 3]) },
+        };
         mine.onto(&mut body);
         g.ghosts.add(body);
         g.online.predictor.pending.retain(|(c, _)| c.seq > ack);
@@ -584,7 +600,7 @@ mod tests {
         (server, client, ghosts)
     }
     fn ctx() -> Context {
-        Context { me: 1, dt: 1. / 60., stim: false, burden: 1., kungfu: None }
+        Context { me: 1, dt: 1. / 60., stim: false, burden: 1., kungfu: None, titan: None }
     }
     fn walk(seq: u32, stick: Vec2, yaw: f32, buttons: u16) -> Command {
         Command::new(seq, stick, yaw, 0., buttons, 1, None)

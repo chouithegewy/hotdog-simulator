@@ -801,6 +801,9 @@ fn camera(world: &mut World) {
             let turn = Quat::from_rotation_y(yaw + v.orbit.yaw) * Quat::from_rotation_x(v.orbit.pitch);
             let eye = target + turn * Vec3::Z * v.orbit.distance;
             let eye = Vec3::new(eye.x, eye.y.max(target.y - 0.05), eye.z);
+            // Never buried in a roof (a den's on the kitchen floor: a table top, the sideboard) or a wall: as near as
+            // there is room (deathcam.rs).
+            let eye = world.get_resource::<crate::death::Deaths>().map_or(eye, |d| crate::deathcam::pull_in(&d.scene, target, eye, 0.03));
             Some((Transform::from_translation(eye).looking_at(target, Vec3::Y), 70f32.to_radians()))
         }
         _ => None,

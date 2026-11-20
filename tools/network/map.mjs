@@ -5,17 +5,19 @@
 // crates/kitchen-sim/src/map.rs implements the same rules for the game client; fixtures/map-golden.json keeps them in step.
 
 // VERSION is the newest map version this build reads. A map is written as version 1 unless it uses something version 2 added (`versionOf`): sinks, the fitted
-// cabinets, the counter things among KITS after the first two (FIRST_KITS), the styles after the first nine (FIRST_STYLES), a ramp with a style or one that starts
+// cabinets, the kitchen floor (`floor`), the counter things among KITS after the first two (FIRST_KITS), the styles after the first nine (FIRST_STYLES), a ramp with a style or one that starts
 // below the counter, and the bin. So a map that
 // needs none of them stays byte for byte what it was and builds that read only version 1 still read it; one that does is refused by them with a reason.
 export const FLOOR=.9025,FORMAT='hotdog-map',VERSION=2;
 // The materials of blocks, decks, ramps and boxes; version 1 knew the first nine. Bamboo (ROUND) is also a shape: a deck of bamboo is round (a steamer's lid:
-// the ellipse inside its rect is its floor, `round`), and a slim block of it is a chopstick standing in its holder.
-export const STYLES=['steel','stone','wood','dark','white','red','green','yellow','metal','bamboo'],FIRST_STYLES=9,ROUND='bamboo';
+// the ellipse inside its rect is its floor, `round`), and a slim block of it is a chopstick standing in its holder. Card, the last, is cardboard: the box on
+// Titan's Kitchen's floor that a hotdog climbs.
+export const STYLES=['steel','stone','wood','dark','white','red','green','yellow','metal','bamboo','card'],FIRST_STYLES=9,ROUND='bamboo';
 // Appliances and the things that stand on a kitchen counter: blocks (a box each to walk round, shoot at and stand on) that the game draws as what they are, with a
 // front on their `facing` side (the griddle's is the side with its thermostat dial: it is switched on and off, heats and burns, crates/kitchen-sim/src/griddle.rs;
-// the gong is a wok hung in a frame of long chopsticks, struck at a knockout in Kung Fu). Version 1 knew the first two.
-export const KITS=['microwave','toaster','kettle','knife-block','canister','jar','cereal','paper-towel','dish-rack','spice-rack','fruit-bowl','faucet','griddle','gong'],FIRST_KITS=2;
+// the gong is a wok hung in a frame of long chopsticks, struck at a knockout in Kung Fu). The last three stand on the kitchen floor of a `floor` map (Titan's
+// Kitchen), at their true sizes: the fridge (its door ajar, lit inside), the oven (a freestanding range) and a pet's bowl. Version 1 knew the first two.
+export const KITS=['microwave','toaster','kettle','knife-block','canister','jar','cereal','paper-towel','dish-rack','spice-rack','fruit-bowl','faucet','griddle','gong','fridge','oven','pet-bowl'],FIRST_KITS=2;
 // A sink's depth below the counter when the map does not give one, and the deepest a sink (or the foot of a ramp down into one) may go.
 export const SINK_DEPTH=.18,SINK_MAX=.5;
 // Loose objects: props that can be knocked about. The game simulates them as rigid bodies (crates/kitchen-sim/src/props.rs; their shapes are in presets.mjs).
@@ -26,9 +28,11 @@ export const RISES=['+x','-x','+z','-z'];
 // How the game dresses and lights the map; it changes nothing about collision or navigation.
 export const THEMES=['kitchen','night','jungle'];
 // What a map was made for: 'siege' (the zombie wave, then the free for all), 'forts' (two teams build a fortress each side of a forcefield, then fight over the
-// bacon) or 'kungfu' (hands and feet only, in a ring). It is only the mode the map is played in when nothing else says: the mode is the game's (the lobby, the
-// page's ?mode=, the server's --mode), and a map may be played in any mode it can hold (kitchen-sim rules.rs `Map::refuses`; `refuses` here).
-export const MODES=['siege','forts','kungfu'];
+// bacon), 'kungfu' (hands and feet only, in a ring) or 'titan' (one giant hotdog against all the others: its first start is the titan's, the rest the small
+// hotdogs'; its box props with a base are the dens only small hotdogs fit under). It is only the mode the map is played in when nothing else says: the mode is
+// the game's (the lobby, the page's ?mode=, the server's --mode), and a map may be played in any mode it can hold (kitchen-sim rules.rs `Map::refuses`; `modes`
+// here).
+export const MODES=['siege','forts','kungfu','titan'];
 // The two teams of a Forts map, in the order the game numbers them (0 and 1), and what they are called.
 export const TEAMS=['mustard','ketchup'],TEAM_NAMES=['Mustard Eaters','Ketchup Connoisseurs'];
 // What a map marks out for Forts, in its `zones` (layout any map may carry: one with all of them can be played as Forts): each team's base (an area, with its
@@ -51,6 +55,10 @@ const CLIMB=.12,FOOT=.03,HEAD=.15,PLAYERS=5;
 // nearer in than x = -2.5 and 2.5 and z = 3.7, the bundled counter's room), up to the largest kitchen, which holds a counter inside ROOM, [min x, max x, max z].
 // (The room is open towards -z, where the fridge stands some two metres off.) crates/kitchen-sim/src/map.rs has the same ROOM.
 export const ROOM=[-4.5,4.5,5];
+// Titan (a map made for it, `mode` 'titan'): the giant's footprint radius and standing height (kitchen-sim titan.rs RADIUS and TALL; map.rs's tests hold
+// these to them), and how far beyond its footprint its start must be clear. Its first start is the titan's; it cannot stand on or enter any block, deck,
+// ramp or sink, nor any box whose base is below its height (a table top, a cabinet's front over the toe-kick: the dens only small hotdogs fit under).
+export const TITAN={radius:.36,tall:1.8,clear:.15,smalls:5};
 
 export class MapError extends Error {constructor(message){super(message);this.name='MapError'}}
 
@@ -134,8 +142,9 @@ export function normalizeSettings(input){
   const theme=choice(input.theme,'theme',THEMES,'kitchen'),mode=choice(input.mode,'mode',MODES,'siege');
   const rules=mode==='forts'?{build:number(input.build,'build',5,900,BUILD)}:{};
   if(input.respawn!==undefined&&input.respawn!==null){if(!Array.isArray(input.respawn)||input.respawn.length!==2)fail('respawn must be [weapon seconds, ammo seconds]');rules.respawn=input.respawn.map((v,i)=>number(v,`respawn[${i}]`,1,600))}
-  // Fitted cabinets: doors and drawers down the counter's front and ends, and dressed wall cupboards. Scenery only; written only when on.
-  if(input.cabinets!==undefined&&input.cabinets!==null){if(typeof input.cabinets!=='boolean')fail('cabinets must be true or false');if(input.cabinets)rules.cabinets=true}
+  // Fitted cabinets: doors and drawers down the counter's front and ends, and dressed wall cupboards. The kitchen floor: the map's ground is the floor, not a
+  // counter top (tiles, and a room whose walls stand at the bounds, its ceiling 2.7 m up, with a window). Scenery only; each written only when on.
+  for(const key of ['cabinets','floor'])if(input[key]!==undefined&&input[key]!==null){if(typeof input[key]!=='boolean')fail(`${key} must be true or false`);if(input[key])rules[key]=true}
   const bounds=rect(input.bounds,'bounds');
   if(bounds[2]-bounds[0]<.2||bounds[3]-bounds[1]<.2)fail('bounds must be at least 0.2 m on each side');
   const nav={cell:number(input.nav?.cell,'nav.cell',.01,.5,.04),clearance:number(input.nav?.clearance,'nav.clearance',0,.2,.035)};
@@ -163,7 +172,7 @@ export function normalize(input){
 /** The version a map is written as (see VERSION): 2 when it uses anything version 1 did not have, 1 otherwise. */
 export function versionOf(map){
   const late=style=>STYLES.indexOf(style)>=FIRST_STYLES;
-  const newer=!!map.cabinets||(map.sinks??[]).length>0||map.blocks.some(b=>KITS.indexOf(b.style)>=FIRST_KITS||late(b.style))||map.decks.some(d=>late(d.style))||map.ramps.some(r=>r.base<0||r.style!==undefined)
+  const newer=!!map.cabinets||!!map.floor||(map.sinks??[]).length>0||map.blocks.some(b=>KITS.indexOf(b.style)>=FIRST_KITS||late(b.style))||map.decks.some(d=>late(d.style))||map.ramps.some(r=>r.base<0||r.style!==undefined)
     ||map.props.some(p=>p.kind==='bin'||p.kind==='box'&&late(p.style));
   return newer?VERSION:1;
 }
@@ -175,6 +184,7 @@ export function stringify(map){
   const out={...map,version:versionOf(map)};
   if(!out.sinks?.length)delete out.sinks;
   if(!out.cabinets)delete out.cabinets;
+  if(!out.floor)delete out.floor;
   const lines=Object.entries(out).map(([key,value])=>{
     const expanded=Array.isArray(value)&&value.length&&typeof value[0]==='object'&&!Array.isArray(value[0]);
     return `  ${JSON.stringify(key)}: `+(expanded?`[\n${value.map(item=>'    '+inline(item)).join(',\n')}\n  ]`:inline(value));
@@ -198,8 +208,8 @@ function rayBox(ox,oy,oz,dx,dy,dz,x0,y0,z0,x1,y1,z1){
 /** Whether a map has the whole Forts layout in its zones: a base for each team, the field and the bacon's spot (kitchen-sim map.rs `fort_layout`). */
 export const fortLayout=map=>{const zones=map.zones??[];return TEAMS.every(team=>zones.some(z=>z.kind==='base'&&z.team===team))&&zones.some(z=>z.kind==='field')&&zones.some(z=>z.kind==='bacon')};
 /** The modes a map can be played in (kitchen-sim rules.rs `Map::modes`): the dojo Kung Fu alone; any other map the siege and Free For All, Forts where it has the
- * layout (or was made for Forts), and Fully Loaded (whose table the server keeps to Counter Siege). */
-export const modes=map=>map.mode==='kungfu'?['kungfu']:['siege',...fortress(map)?['forts']:[],'ffa','cards'];
+ * layout (or was made for Forts), and Fully Loaded (whose table the server keeps to Counter Siege); Titan only on a map made for it (`mode` 'titan'). */
+export const modes=map=>map.mode==='kungfu'?['kungfu']:['siege',...fortress(map)?['forts']:[],'ffa','cards',...map.mode==='titan'?['titan']:[]];
 /**
  * What a map made for Forts, or any map with the whole Forts layout (`fortLayout`), says for Forts, with what it leaves out filled in, so that an unfinished
  * Forts map still plays (`analyze` reports what is missing). Null for any other map: one whose zones are not the whole layout cannot be played as Forts.
@@ -291,6 +301,8 @@ export class Level {
     }
     // rect, depth
     this.sinks=new Float64Array((map.sinks??[]).flatMap(sink=>[...sink.rect,sink.depth]));
+    // The box props as shots see them: rect, then the world-space heights of their underside and top. Solid to shots, not to bodies (a hotdog walks under one).
+    this.boxes=new Float64Array(map.props.filter(p=>p.kind==='box').flatMap(p=>[...p.rect,FLOOR+p.base,FLOOR+(p.base+p.height)]));
     // rect, height, 1 when the deck is round (ROUND)
     this.decks=new Float64Array(map.decks.flatMap(deck=>[...deck.rect,deck.height,deck.style===ROUND?1:0]));
     // rect, base, top, axis (0 = x, 1 = z), direction of the rise along that axis
@@ -328,12 +340,14 @@ export class Level {
   /** One movement step from a to b, both [x, y, z]: ledges above STEP need a ramp or a jump. */
   canStep(a,b){const h=this.ground(b[0],b[2]);return h<=a[1]+STEP&&this.walkable(b[0],Math.max(h,b[1]),b[2])}
   /**
-   * Distance a shot from o along the unit vector d travels before a block stops it, or the side or floor of a sink it has gone down into. (The counter top
-   * itself is not cover: whatever fires decides where a shot meets it, with `sunk`.)
+   * Distance a shot from o along the unit vector d travels before a block or a box prop (its whole volume, from its underside up: a table top stops a shot from
+   * under it and one from above) stops it, or the side or floor of a sink it has gone down into. (The counter top itself is not cover: whatever fires decides
+   * where a shot meets it, with `sunk`.)
    */
   cover(o,d){
-    let near=RANGE;const s=this.solids,k=this.sinks;
+    let near=RANGE;const s=this.solids,k=this.sinks,b=this.boxes;
     for(let i=0;i<s.length;i+=5){const t=rayBox(o[0],o[1],o[2],d[0],d[1],d[2],s[i],FLOOR,s[i+1],s[i+2],s[i+4],s[i+3]);if(t<near)near=t}
+    for(let i=0;i<b.length;i+=6){const t=rayBox(o[0],o[1],o[2],d[0],d[1],d[2],b[i],b[i+4],b[i+1],b[i+2],b[i+5],b[i+3]);if(t<near)near=t}
     for(let i=0;i<k.length;i+=5){const t=basin(o,d,k,i);if(t<near)near=t}
     return near;
   }
@@ -436,6 +450,14 @@ export class Level {
   side(x,z){return (this.fort.axis?z:x)<this.fort.mid?-1:1}
 }
 export const compile=map=>new Level(map);
+/** Footprints the titan keeps out of ([x0, z0, x1, z1] each): every block, deck, ramp and sink, and every box whose base is below its height. */
+export const titanWalls=map=>[...map.blocks,...map.decks,...map.ramps,...map.sinks??[],...map.props.filter(p=>p.kind==='box'&&p.base<TITAN.tall)].map(item=>item.rect);
+/** Whether a circle of the titan's radius (grown by `grow`) at [x, z] lies inside the bounds and meets none of `titanWalls`. */
+export function titanClear(map,x,z,grow=0,walls=titanWalls(map)){
+  const r=TITAN.radius+grow,[x0,z0,x1,z1]=map.bounds;
+  if(x-r<x0||x+r>x1||z-r<z0||z+r>z1)return false;
+  return walls.every(([a,b,c,d])=>{const dx=Math.max(a-x,0,x-c),dz=Math.max(b-z,0,z-d);return dx*dx+dz*dz>=r*r});
+}
 /** Whether [x, z] lies on a round deck over `rect` ([minX, minZ, maxX, maxZ]): inside the ellipse that fills it. map.rs `round` works it out in the same order. */
 export function round(rect,x,z){const dx=(x-(rect[0]+rect[2])/2)/((rect[2]-rect[0])/2),dz=(z-(rect[1]+rect[3])/2)/((rect[3]-rect[1])/2);return dx*dx+dz*dz<=1}
 /**
@@ -475,6 +497,9 @@ const ISSUES={
   'bacon-unreachable':['error',(n,level,kind,team)=>`The ${team} cannot reach the bacon on foot once the forcefield is down`],
   'base-unreachable':['error',(n,level,kind,team)=>`The ${team} cannot carry the bacon home: no way on foot from the bacon to their base`],
   'stock-missing':['warning',(n,level,kind,team)=>`The ${team} have no loose objects on their side to build with`],
+  // Titan (a map made for it).
+  'titan-start-cramped':['error',()=>`The titan's start (start 1) must stand in the open, ${TITAN.radius+TITAN.clear} m clear of every block, deck, ramp, sink and box below ${TITAN.tall} m and of the edges`],
+  'titan-few-starts':['warning',()=>`A Titan map wants a start for the titan (the first) and at least ${TITAN.smalls} more for the small hotdogs`],
   'zones-partial':['warning',()=>'Some Forts zones are set but not the whole layout (a base for each team, a field and the bacon): the map cannot be played as Forts until they all are'],
 };
 const ORDER=['starts','spawns','pickups','blocks','decks','ramps','sinks','props','zones'];
@@ -643,6 +668,11 @@ export function analyze(level){
     }
     TEAMS.forEach((team,t)=>{if(!map.props.some(prop=>LOOSE.includes(prop.kind)&&level.side(...prop.p)===fort.sides[t]))report('stock-missing','props',-1,TEAM_NAMES[t])});
   }else if(map.zones.length)report('zones-partial','zones',0);
+  // Titan: the giant's start (the first) in the open, and starts for the small hotdogs.
+  if(map.mode==='titan'){
+    if(!titanClear(map,...map.starts[0].p,TITAN.clear))report('titan-start-cramped','starts',0);
+    if(map.starts.length<1+TITAN.smalls)report('titan-few-starts','starts',-1);
+  }
   // (A bin stands on the kitchen floor beside the counter, off the map by design.)
   for(const kind of ['blocks','decks','ramps','sinks','props','zones'])(map[kind]??[]).forEach((item,index)=>{
     if(item.kind==='bin')return;

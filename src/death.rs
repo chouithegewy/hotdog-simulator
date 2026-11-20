@@ -219,6 +219,15 @@ pub fn scenery(map: &kitchen_sim::map::Map) -> Scene {
         Block { min: Vec3::new(-50., -1., -50.), max: Vec3::new(50., 0., 50.) },
         Block { min: cupboard, max: Vec3::new(top.x, floor - 0.3, top.z) },
     ]);
+    // A map whose ground is the kitchen floor stands in a room of its own, its walls at the bounds (`floor`).
+    if map.floor {
+        let [x0, z0, x1, z1] = map.bounds;
+        let (low, high) = (floor - 0.3, floor + crate::floor::HEIGHT);
+        for r in [[x0 - 0.3, z0 - 0.3, x0, z1 + 0.3], [x1, z0 - 0.3, x1 + 0.3, z1 + 0.3], [x0, z0 - 0.3, x1, z0], [x0, z1, x1, z1 + 0.3]] {
+            blocks.push(rect(r, low, high));
+        }
+        blocks.push(rect([x0, z0, x1, z1], high, high + 0.3));
+    }
     // Fitted cabinets fill the space under the counter, down to the floor (`kitchen::cabinets`).
     if map.cabinets {
         let [x0, z0, x1, z1] = map.bounds;
@@ -239,7 +248,9 @@ pub fn scenery(map: &kitchen_sim::map::Map) -> Scene {
             }
             continue;
         }
-        blocks.push(rect(deck.rect, floor + height - height.min(0.025), floor + height));
+        // (On the kitchen floor a deck stands solid: the box, the step stool.)
+        let plate = if map.floor { height } else { height.min(0.025) };
+        blocks.push(rect(deck.rect, floor + height - plate, floor + height));
     }
     for prop in &map.props {
         match prop {
@@ -923,8 +934,17 @@ fn tick(
     if deaths.scene.blocks.is_empty() || theme.is_some_and(|theme| theme.is_changed()) {
         deaths.scene = scenery(&game.feast.level.map);
     }
+    // (The titan is not a hotdog that falls in a heap: titan/ draws its fall. Its body is left out.)
+    let titan: Vec<Player>;
+    let roster = match crate::titan::titan_id(&game) {
+        Some(id) => {
+            titan = game.roster.iter().filter(|p| p.id != id).cloned().collect();
+            &titan[..]
+        }
+        None => &game.roster[..],
+    };
     let view = View {
-        roster: &game.roster,
+        roster,
         feast: &game.feast,
         elapsed: game.elapsed,
         wave: game.phase_name() == "Siege",

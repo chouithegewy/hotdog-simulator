@@ -51,6 +51,11 @@ html.touch-on .gfx-item{min-height:40px}</style>
 .replay-note .actions>.primary{background:#dfb97b;border:0;color:#172321}
 .replay-note.banner{top:calc(max(0px,env(safe-area-inset-top)) + 12px);transform:translateX(-50%);padding:10px 14px 12px}.replay-note.banner .line{margin-bottom:10px;font-size:12px}
 @media(max-width:900px){html.replaying .modes{display:none}}</style>
+<style>/* The page's links (Play, the demo, Licences and source) belong to the start page: while the game is on the screen (a round,
+   the demo, a replay, a cut scene: the game sets data-screen=game, src/menu.rs) they would sit over its display, so they go, and
+   they come back over its Esc menu (data-screen=menu), which has the licences of its own too. (touch.css shows them in the touch menu.) */
+html[data-screen=game] .modes{display:none}
+html[data-screen=menu] .modes{z-index:8}</style>
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -114,6 +119,8 @@ for(const type of ['error','unhandledrejection'])addEventListener(type,event=>{i
  if(!/RuntimeError|unreachable|out of memory|memory access out of bounds|Maximum call stack/i.test(text))return;document.querySelector('#loading').hidden=true;
  const [title]=page?.replayTrouble?.('memory')??['The replay stopped'];
  say(title,`The game stopped while the replay played (${text.slice(0,120)}). On a phone that is most often memory: light mode draws less.`,[['Try in light mode',()=>{guard?.clear();location.replace(home+(page?.lightAddress?.(location.search)??location.search)+location.hash)},true],['Back to the game',home]])});
+// The game stopped (a panic): it is no longer what is on the screen, so the page's links come back (src/menu.rs hides them over it).
+for(const type of ['error','unhandledrejection'])addEventListener(type,event=>{if(/RuntimeError|unreachable/i.test(String(event.message??event.reason?.message??event.reason??'')))delete document.documentElement.dataset.screen});
 let stage=0;window.hotdogAction=0;
 const stages=[
  ['01 / 03 · Meet the chef','The morning shift','Maya is here to bring all six hotdogs to the prep station.','Opening the fridge…',true],
@@ -179,7 +186,8 @@ const query=new URLSearchParams(location.search),load=dir=>{const wasm=loading.f
 const handed=new URLSearchParams(location.hash.slice(1)).get('map'),named=query.get('map');
 if(handed)window.hotdogMap=handed;
 else if(named&&/^[\w-]+$/.test(named))window.hotdogMap=await fetch(`assets/maps/${named}.json`).then(r=>r.ok?r.text():null).catch(()=>null);
-else if(!named&&query.get('mode')==='forts'&&!query.has('mp')&&!query.get('server'))window.hotdogMap=await fetch('assets/maps/pillow-fort.json').then(r=>r.ok?r.text():null).catch(()=>null); // offline Forts with no map named: Pillow Fort
+else if(!named&&!query.has('mp')&&!query.get('server')){const own=page?.ownMap?.(query.get('mode'))??(query.get('mode')==='forts'?'pillow-fort':''); // offline, no map named: Forts on Pillow Fort, Kung Fu in the dojo, Titan in Titan's Kitchen
+ if(own)window.hotdogMap=await fetch(`assets/maps/${own}.json`).then(r=>r.ok?r.text():null).catch(()=>null)}
 window.hotdogMapVersion=0;
 window.addEventListener('message',event=>{if(event.data?.type==='hotdog-map'&&typeof event.data.text==='string'&&event.data.text.length<4e6){window.hotdogMap=event.data.text;window.hotdogMapVersion++}});
 // Touch controls (touch.js, src/touch.rs) on a device with a touch screen, or with ?touch in the address (?touch=0: never).

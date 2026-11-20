@@ -14,7 +14,9 @@ mod controls;
 mod damage;
 mod death;
 mod dojo;
+mod floor;
 mod deathcam;
+mod director;
 mod fight;
 mod forts;
 mod fu;
@@ -50,6 +52,7 @@ mod spawns;
 mod squirt;
 mod tags;
 mod telemetry;
+mod titan;
 mod topsy;
 mod touch;
 mod tune;
@@ -117,6 +120,7 @@ fn main() {
         .add_plugins(bake::Plugin)
         .add_plugins(kungfu::Plugin)
         .add_plugins(tags::Plugin)
+        .add_plugins(director::Plugin)
         .add_plugins(hints::Plugin)
         .add_plugins(hud::Plugin)
         .add_plugins((damage::Plugin, slowmo::Plugin, topsy::Plugin))
@@ -125,6 +129,7 @@ fn main() {
         .add_plugins(dojo::Plugin)
         .add_plugins(fu::Plugin)
         .add_plugins(fight::Plugin)
+        .add_plugins(titan::Plugin)
         .add_plugins(menu::Plugin)
         .add_plugins(preview::Plugin)
         .add_plugins(scope::Plugin)

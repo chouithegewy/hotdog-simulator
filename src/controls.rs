@@ -18,7 +18,9 @@
 //!   ([`Bindings::conflict`]); the trigger and the throw can (both the left button), so can the wheel's guns and its
 //!   turning of what is carried, the reload and the build phase's ready (both R: the guns are locked while it is
 //!   heard), and Kung Fu's strikes, kicks, block, grab, dodge and styles share the keys of the
-//!   trigger, the aim, the melee, picking up, using, the stim and the guns, which are not heard there. A
+//!   trigger, the aim, the melee, picking up, using, the stim and the guns, which are not heard there, as the titan's
+//!   swat, ground smash, stomp and charge share the trigger's, the aim's, the melee's and the stim's (a player who is the
+//!   titan has no gun, carries nothing and takes no stim). A
 //!   rebind onto an input in use is refused with the action that has it, and [`Bindings::swap`] settles it by giving
 //!   that action the input it replaces.
 //! * **Kept** in prefs.rs, `controls` (only the actions that differ from the defaults, as JSON, so a default changed
@@ -69,6 +71,11 @@ pub enum Context {
     Carrying,
     /// In Kung Fu.
     KungFu,
+    /// While this player is the titan (Titan mode, kitchen-sim titan.rs): its moves. It hears nothing armed, carried,
+    /// picked up or stimmed; walking, jumping, crouching and the hints it hears as everyone does.
+    Titan,
+    /// The view over the shoulder, in Kung Fu and as the titan (fight.rs, titan/camera.rs).
+    ThirdPerson,
     /// Watching a replay (replay/): only the viewer's keys are heard, none of the game's.
     Replay,
 }
@@ -79,6 +86,10 @@ impl Context {
             (Replay, Replay) => true,
             (Replay, _) | (_, Replay) => false,
             (Always, _) | (_, Always) => true,
+            (ThirdPerson, ThirdPerson | KungFu | Titan) | (KungFu | Titan, ThirdPerson) => true,
+            (ThirdPerson, _) | (_, ThirdPerson) => false,
+            (Titan, Titan) => true,
+            (Titan, _) | (_, Titan) => false,
             (KungFu, KungFu) => true,
             (KungFu, _) | (_, KungFu) => false,
             // (The guns are locked in the build phase: nothing is reloaded then.)
@@ -101,13 +112,15 @@ pub enum Group {
     KungFu,
     /// Kung Fu's styles by name (a tab of their own: the fight's tab would not fit the window with them).
     Styles,
+    /// The titan's moves (Titan mode): the swat, the ground smash, the stomp, the charge.
+    Titan,
     /// A replay's playback (replay/): play, the speeds, seeking, the stats and the overlays.
     Replay,
     /// A replay's camera: whose view, first person, following, flying.
     Camera,
 }
 impl Group {
-    pub const ALL: [Group; 8] = [Group::Movement, Group::Combat, Group::Weapons, Group::Carrying, Group::KungFu, Group::Styles, Group::Replay, Group::Camera];
+    pub const ALL: [Group; 9] = [Group::Movement, Group::Combat, Group::Weapons, Group::Carrying, Group::KungFu, Group::Styles, Group::Titan, Group::Replay, Group::Camera];
     pub fn name(self) -> &'static str {
         match self {
             Group::Movement => "MOVEMENT",
@@ -116,6 +129,7 @@ impl Group {
             Group::Carrying => "CARRYING",
             Group::KungFu => "KUNG FU",
             Group::Styles => "STYLES",
+            Group::Titan => "TITAN",
             Group::Replay => "REPLAY",
             Group::Camera => "REPLAY CAMERA",
         }
@@ -185,8 +199,16 @@ pub enum Action {
     Style5,
     Style6,
     Style7,
-    /// Kung Fu: the camera over the shoulder, or back in first person (KF6, fight.rs).
+    /// Kung Fu and the titan: the camera over the shoulder (behind and above the titan), or back in first person (KF6,
+    /// fight.rs; titan/camera.rs).
     View,
+    /// The titan (Titan mode, kitchen-sim titan.rs, on the bits of what they stand in for: interface.md section 3): the
+    /// swat (a wide sweep of the arm, high standing, low crouched), the ground smash, the stomp (a kick crouched) and the
+    /// charge. Its jump and crouch are everyone's.
+    Swat,
+    Smash,
+    Stomp,
+    Charge,
     /// A replay (replay/): play or pause, slower and faster (0.25x, 0.5x, 1x, 2x), one frame on, five seconds back
     /// and on, the kill before and after, the stats, every display hidden, the help, and the overlays (names over
     /// everyone, damage numbers, shot tracers, the map).
@@ -223,7 +245,7 @@ pub enum Action {
     FlyDown,
     FlyFast,
 }
-pub const ACTIONS: usize = 81;
+pub const ACTIONS: usize = 85;
 impl Action {
     pub const ALL: [Action; ACTIONS] = [
         Action::Forward,
@@ -277,6 +299,10 @@ impl Action {
         Action::Style6,
         Action::Style7,
         Action::View,
+        Action::Swat,
+        Action::Smash,
+        Action::Stomp,
+        Action::Charge,
         Action::PlayPause,
         Action::Slower,
         Action::Faster,
@@ -369,7 +395,11 @@ impl Action {
             Action::Style5 => "MONKEY",
             Action::Style6 => "DRUNKEN",
             Action::Style7 => "TOAD",
-            Action::View => "THIRD PERSON (KUNG FU)",
+            Action::View => "THIRD PERSON (KUNG FU, TITAN)",
+            Action::Swat => "SWAT (LOW CROUCHED)",
+            Action::Smash => "GROUND SMASH",
+            Action::Stomp => "STOMP (KICK CROUCHED)",
+            Action::Charge => "CHARGE",
             Action::PlayPause => "PLAY / PAUSE",
             Action::Slower => "SLOWER",
             Action::Faster => "FASTER",
@@ -456,6 +486,10 @@ impl Action {
             Action::Style6 => "fu_style_drunken",
             Action::Style7 => "fu_style_toad",
             Action::View => "fu_third_person",
+            Action::Swat => "titan_swat",
+            Action::Smash => "titan_smash",
+            Action::Stomp => "titan_stomp",
+            Action::Charge => "titan_charge",
             Action::PlayPause => "replay_play",
             Action::Slower => "replay_slower",
             Action::Faster => "replay_faster",
@@ -496,7 +530,9 @@ impl Action {
             Reload => Context::Loading,
             // (R, as the reload is: the guns are locked while it is heard.)
             Ready => Context::Build,
-            Light | Heavy | Kick | Block | Grab | Dodge | Special | NextStyle | PreviousStyle | Style1 | Style2 | Style3 | Style4 | Style5 | Style6 | Style7 | View => Context::KungFu,
+            Light | Heavy | Kick | Block | Grab | Dodge | Special | NextStyle | PreviousStyle | Style1 | Style2 | Style3 | Style4 | Style5 | Style6 | Style7 => Context::KungFu,
+            View => Context::ThirdPerson,
+            Swat | Smash | Stomp | Charge => Context::Titan,
             PlayPause | Slower | Faster | StepFrame | SeekBack | SeekAhead | PreviousKill | NextKill | Stats | HideUi | ReplayHelp | NameTags | DamageNumbers | Tracers | Minimap | CameraMode | NextPlayer | PreviousPlayer | Watch1 | Watch2
             | Watch3 | Watch4 | Watch5 | FlyForward | FlyBack | FlyLeft | FlyRight | FlyUp | FlyDown | FlyFast => Context::Replay,
             // Kung Fu has no stim (Shift dodges), no prone (T is the special), nothing to pick up, use or carry, no Forts.
@@ -512,6 +548,7 @@ impl Action {
             Carry | Throw | TurnClockwise | TurnAnticlockwise | Tip => Group::Carrying,
             Light | Heavy | Kick | Block | Grab | Dodge | Special | NextStyle | PreviousStyle => Group::KungFu,
             Style1 | Style2 | Style3 | Style4 | Style5 | Style6 | Style7 => Group::Styles,
+            Swat | Smash | Stomp | Charge => Group::Titan,
             PlayPause | Slower | Faster | StepFrame | SeekBack | SeekAhead | PreviousKill | NextKill | Stats | HideUi | ReplayHelp | NameTags | DamageNumbers | Tracers | Minimap => Group::Replay,
             CameraMode | NextPlayer | PreviousPlayer | Watch1 | Watch2 | Watch3 | Watch4 | Watch5 | FlyForward | FlyBack | FlyLeft | FlyRight | FlyUp | FlyDown | FlyFast => Group::Camera,
             _ => Group::Weapons,
@@ -807,8 +844,14 @@ pub fn default_of(action: Action) -> [Option<Input>; 2] {
         Style5 => [key(KeyCode::Digit5), None],
         Style6 => [key(KeyCode::Digit6), None],
         Style7 => [key(KeyCode::Digit7), None],
-        // (V: a view key in many games, free in Kung Fu.)
+        // (V: a view key in many games, free in Kung Fu and as the titan.)
         View => [key(KeyCode::KeyV), None],
+        // The titan, on the keys of what they stand in for (the spec, interface.md): the trigger swats, the aim smashes,
+        // the melee key stomps, the stim key charges.
+        Swat => [mouse(MouseButton::Left), None],
+        Smash => [mouse(MouseButton::Right), None],
+        Stomp => [key(KeyCode::KeyF), None],
+        Charge => [key(KeyCode::ShiftLeft), None],
         // A replay's keys (replay/), heard only there, so they may be the game's own. The flying camera moves on the walk's
         // keys, climbs on the jump's and descends on the crouch's; Shift flies fast. `?` is the help.
         PlayPause => [key(KeyCode::KeyP), key(KeyCode::KeyK)],
@@ -1249,6 +1292,51 @@ mod tests {
         k.assign(Action::Light, 1, Input::Key(KeyCode::KeyK)).unwrap();
         keys.press(KeyCode::KeyK);
         assert!(k.held_by_key(Action::Light, &keys));
+    }
+
+    /// The titan's moves are on the keys of what they stand in for (the spec): the swat the trigger's, the ground smash
+    /// the aim's, the stomp the melee's, the charge the stim's. None of those is heard while this player is the titan, so
+    /// nothing clashes; what the titan hears with everyone (walking, jumping, crouching, the hints) they may not take.
+    #[test]
+    fn the_titans_defaults_share_the_keys_of_the_gun_actions_and_clash_with_nothing() {
+        let b = Bindings::default();
+        let table = [
+            (Action::Swat, [Some(Input::Mouse(MouseButton::Left)), None], Action::Fire),
+            (Action::Smash, [Some(Input::Mouse(MouseButton::Right)), None], Action::Aim),
+            (Action::Stomp, [Some(Input::Key(KeyCode::KeyF)), None], Action::Melee),
+            (Action::Charge, [Some(Input::Key(KeyCode::ShiftLeft)), None], Action::Stim),
+        ];
+        for (action, slots, shares) in table {
+            assert_eq!(b.get(action), slots, "{action:?}");
+            assert_eq!((action.context(), action.group()), (Context::Titan, Group::Titan));
+            assert_eq!(b.get(shares)[0], slots[0], "{action:?} shares {shares:?}'s key");
+            assert!(!action.context().overlaps(shares.context()) && !b.clashing(action, 0), "{action:?}");
+            assert!(action.id().starts_with("titan_"));
+        }
+        // Their tab, after Kung Fu's, before the replay's; four moves on it.
+        assert_eq!(Group::ALL.iter().position(|g| *g == Group::Titan), Some(6));
+        assert_eq!((Group::Titan.name(), Action::ALL.iter().filter(|a| a.group() == Group::Titan).count()), ("TITAN", 4));
+        assert_eq!(Action::ALL.len(), ACTIONS);
+        assert!(Action::ALL.iter().enumerate().all(|(i, a)| a.at() == i));
+        // The titan is never in Kung Fu, nor armed, carrying, stimmed or building; it hears the always-heard keys.
+        for other in [Context::KungFu, Context::Kitchen, Context::Armed, Context::Loading, Context::Build, Context::Carrying, Context::Replay] {
+            assert!(!Context::Titan.overlaps(other), "{other:?}");
+        }
+        assert!(Context::Titan.overlaps(Context::Always) && Context::Titan.overlaps(Context::Titan));
+        assert_eq!(b.conflict(Action::Swat, Input::Key(KeyCode::Space)).map(|c| c.action), Some(Action::Jump));
+        assert_eq!(b.conflict(Action::Charge, Input::Key(KeyCode::KeyC)).map(|c| c.action), Some(Action::Crouch));
+        assert_eq!(b.conflict(Action::Stomp, Input::Mouse(MouseButton::Left)).map(|c| c.action), Some(Action::Swat));
+        // The view over the shoulder (V) is the titan's as it is Kung Fu's: a titan move may not take it.
+        assert_eq!(Action::View.context(), Context::ThirdPerson);
+        assert!(Context::ThirdPerson.overlaps(Context::KungFu) && Context::ThirdPerson.overlaps(Context::Titan) && !Context::ThirdPerson.overlaps(Context::Armed));
+        assert_eq!(b.conflict(Action::Smash, Input::Key(KeyCode::KeyV)).map(|c| c.action), Some(Action::View));
+        assert_eq!(b.conflict(Action::Melee, Input::Key(KeyCode::KeyV)), None, "a gun action may still have V");
+        // Kept and read back like the others.
+        let mut kept = Bindings::default();
+        kept.assign(Action::Charge, 0, Input::Key(KeyCode::KeyG)).unwrap();
+        let read = Bindings::from_text(Some(&kept.to_text()), false);
+        assert_eq!(read.get(Action::Charge), [Some(Input::Key(KeyCode::KeyG)), None]);
+        assert!(kept.to_text().contains("titan_charge"));
     }
 
     #[test]

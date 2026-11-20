@@ -206,6 +206,7 @@ fn mode_name(mode: &str) -> &'static str {
         "ffa" => "Free For All",
         "cards" => "Fully Loaded",
         "kungfu" => "Kung Fu",
+        "titan" => "Titan",
         "" => "",
         _ => "Siege",
     }
@@ -824,6 +825,8 @@ mod tests {
         // Kung Fu, on its dojo.
         assert_eq!(chosen("kung-fu-dojo", "Kung Fu Dojo", "kungfu", "kitchen", false), "Kung Fu | Kung Fu Dojo | kitchen");
         assert_eq!(chosen("random", "Random", "kungfu", "", true), "Kung Fu | Random map");
+        // Titan, on the kitchen floor.
+        assert_eq!(chosen("titans-kitchen", "Titan's Kitchen", "titan", "night", false), "Titan | Titan's Kitchen | night");
         assert_eq!(chosen("", "", "", "", false), "", "nothing chosen yet");
     }
     #[test]
@@ -836,6 +839,7 @@ mod tests {
         assert_eq!(playing_line("siege", "Pillow Fort"), "Siege | Pillow Fort", "a Forts map played as a siege");
         assert_eq!(playing_line("ffa", "Horde Night"), "Free For All | Horde Night");
         assert_eq!(playing_line("kungfu", "Kung Fu Dojo"), "Kung Fu | Kung Fu Dojo");
+        assert_eq!(playing_line("titan", "Titan's Kitchen"), "Titan | Titan's Kitchen");
         // As the game says it.
         let mut g = kitchen_sim::feast::Feast::with_map(kitchen_sim::map::Map::parse(include_str!("../assets/maps/pillow-fort.json")).unwrap(), false);
         assert_eq!(g.mode().name(), "forts");

@@ -148,6 +148,10 @@ pub fn offline(g: &mut Game) {
     changes(f, w, q, stage_index(f.stage));
     griddles(g);
     kungfu(g);
+    // TODO(titan): Titan's own events (kitchen_sim::titan `EventKind`: tells, footfalls, the smash, swats, the landing, the
+    // stagger, weak-spot hits, the titan down, reinforcements; `Feast::titan_view().events`, online `{type:'titan'}`) are
+    // not yet mapped to KS_EVENT_* and sounds. The mode itself is (`KS_MODE_TITAN`), and a hit by the titan reaches the
+    // C side as any damage does (its kind kitchen_sim::feast::TITAN, 17). Out of scope for the Titan sim work (TI1).
 }
 /// After a frame: its shots, splats and knocks (each sent once), then what changed.
 pub fn online(g: &mut Game) {

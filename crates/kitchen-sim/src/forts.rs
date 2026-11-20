@@ -313,7 +313,8 @@ impl Feast {
     }
     /// Forts: whether two hotdogs are on one team, whose rounds, bursts and blows spare each other.
     pub fn allied(&self, a: u32, b: u32) -> bool {
-        self.fort.is_some() && matches!((self.player(a), self.player(b)), (Some(a), Some(b)) if a.team == b.team)
+        // (Titan: the small hotdogs are one team, the titan the other: titan.rs.)
+        (self.fort.is_some() || self.titan.is_some()) && matches!((self.player(a), self.player(b)), (Some(a), Some(b)) if a.team == b.team)
     }
     /// The people playing who are still alive, and how many of them are ready: when all of them are, the
     /// build phase ends early.

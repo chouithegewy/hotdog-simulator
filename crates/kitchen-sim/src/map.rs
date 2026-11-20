@@ -12,19 +12,20 @@ use std::fmt;
 
 pub const FORMAT: &str = "hotdog-map";
 /// The newest map version this build reads. A map is written as version 1 unless it uses something version 2
-/// added (see `Map::version`): sinks, the fitted cabinets, the counter things among KITS after the first two
-/// (`FIRST_KITS`), the styles after the first nine (`FIRST_STYLES`), a ramp with a style or one that starts below the
-/// counter, and the bin. So a map that needs none
+/// added (see `Map::version`): sinks, the fitted cabinets, the kitchen floor (`floor`), the counter things among KITS
+/// after the first two (`FIRST_KITS`), the styles after the first nine (`FIRST_STYLES`), a ramp with a style or one that
+/// starts below the counter, and the bin. So a map that needs none
 /// of them stays byte for byte what it was, and builds that read only version 1 still read it; one that does need
 /// them is refused by those builds with a reason, rather than played without its sink.
 pub const VERSION: f64 = 2.;
 /// Height of the counter top in world space; every map height is measured from it.
 pub const FLOOR: f64 = 0.9025;
-/// The materials of blocks, decks, ramps and boxes. Version 1 knew the first nine (`FIRST_STYLES`). Bamboo, the
-/// last, is also a shape: a deck of bamboo is round (a bamboo steamer's lid: the ellipse inside its rect is its floor,
-/// see `round`), and a slim block of it is a chopstick standing in its holder.
-pub const STYLES: [&str; 10] = [
-    "steel", "stone", "wood", "dark", "white", "red", "green", "yellow", "metal", "bamboo",
+/// The materials of blocks, decks, ramps and boxes. Version 1 knew the first nine (`FIRST_STYLES`). Bamboo is also a
+/// shape: a deck of bamboo is round (a bamboo steamer's lid: the ellipse inside its rect is its floor, see `round`), and
+/// a slim block of it is a chopstick standing in its holder. Card, the last, is cardboard: the box on Titan's Kitchen's
+/// floor that a hotdog climbs.
+pub const STYLES: [&str; 11] = [
+    "steel", "stone", "wood", "dark", "white", "red", "green", "yellow", "metal", "bamboo", "card",
 ];
 pub const FIRST_STYLES: usize = 9;
 /// The style whose decks are round.
@@ -32,9 +33,11 @@ pub const ROUND: &str = "bamboo";
 /// Appliances and the things that stand on a kitchen counter: blocks of the map (a box each to walk round, shoot at
 /// and stand on) that the game draws as what they are, with a front on their `facing` side. Version 1 knew the
 /// first two (`FIRST_KITS`). The griddle is also one that does something: it is switched on and off, heats and burns
-/// (griddle.rs). The gong, the last, is a wok hung in a frame of long chopsticks, Kung Fu's: it is struck at a knockout.
-pub const KITS: [&str; 14] = [
-    "microwave", "toaster", "kettle", "knife-block", "canister", "jar", "cereal", "paper-towel", "dish-rack", "spice-rack", "fruit-bowl", "faucet", "griddle", "gong",
+/// (griddle.rs). The gong is a wok hung in a frame of long chopsticks, Kung Fu's: it is struck at a knockout. The last
+/// three stand on the kitchen floor of a `floor` map (Titan's Kitchen), at their true sizes: the fridge (its door ajar,
+/// lit inside), the oven (a freestanding range: oven door, hob, a clock that glows) and a pet's bowl.
+pub const KITS: [&str; 17] = [
+    "microwave", "toaster", "kettle", "knife-block", "canister", "jar", "cereal", "paper-towel", "dish-rack", "spice-rack", "fruit-bowl", "faucet", "griddle", "gong", "fridge", "oven", "pet-bowl",
 ];
 pub const FIRST_KITS: usize = 2;
 /// A sink's depth below the counter when the map does not give one, and the deepest a sink (or the foot of a ramp
@@ -55,10 +58,12 @@ pub const LOOSE_FORMERLY: [(&str, &str); 1] = [("blanket", "napkin")];
 /// How the game dresses and lights the map; it changes nothing about collision or navigation.
 pub const THEMES: [&str; 3] = ["kitchen", "night", "jungle"];
 /// What a map was made for: "siege" (the zombie wave, then the free for all), "forts" (two teams build a fortress
-/// each side of a forcefield, then fight over the bacon) or "kungfu" (hands and feet only, in a ring). It is the mode a
-/// game of the map is played in when nothing else says (rules.rs `Mode::made_for`): the mode is the game's, and a map
-/// may be played in any mode it can hold (`Map::refuses`).
-pub const MODES: [&str; 3] = ["siege", "forts", "kungfu"];
+/// each side of a forcefield, then fight over the bacon), "kungfu" (hands and feet only, in a ring) or "titan" (one
+/// giant hotdog against all the others: its first start is the titan's, the rest the small hotdogs'; its box props
+/// with a base are the dens only small hotdogs fit under). It is the mode a game of the map is played in when nothing
+/// else says (rules.rs `Mode::made_for`): the mode is the game's, and a map may be played in any mode it can hold
+/// (`Map::refuses`).
+pub const MODES: [&str; 4] = ["siege", "forts", "kungfu", "titan"];
 /// The two teams of a Forts map, in the order the game numbers them (0 and 1), and what they are called.
 pub const TEAMS: [&str; 2] = ["mustard", "ketchup"];
 pub const TEAM_NAMES: [&str; 2] = ["Mustard Eaters", "Ketchup Connoisseurs"];
@@ -264,6 +269,9 @@ pub struct Map {
     pub respawn_given: bool,
     /// Fitted cabinets: doors and drawers down the counter's front and ends, and dressed wall cupboards. Scenery only.
     pub cabinets: bool,
+    /// The map's ground is the kitchen floor, not a counter top: the game draws tiles, and a room whose walls stand at
+    /// the bounds, with a ceiling 2.7 m up and a window (Titan's Kitchen). Scenery only: heights still count from FLOOR.
+    pub floor: bool,
     /// [min x, min z, max x, max z]
     pub bounds: [f64; 4],
     pub cell: f64,
@@ -404,11 +412,12 @@ impl Map {
             Some(Value::Array(list)) if list.len() == 2 => ([number(Some(&list[0]), "respawn[0]", 1., 600., None)?, number(Some(&list[1]), "respawn[1]", 1., 600., None)?], true),
             Some(_) => return fail("respawn must be [weapon seconds, ammo seconds]".into()),
         };
-        let cabinets = match input.get("cabinets") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(given)) => *given,
-            Some(_) => return fail("cabinets must be true or false".into()),
+        let flag = |key: &str| match input.get(key) {
+            None | Some(Value::Null) => Ok(false),
+            Some(Value::Bool(given)) => Ok(*given),
+            Some(_) => fail(format!("{key} must be true or false")),
         };
+        let (cabinets, floor) = (flag("cabinets")?, flag("floor")?);
         let bounds = rect(input.get("bounds"), "bounds")?;
         if bounds[2] - bounds[0] < 0.2 || bounds[3] - bounds[1] < 0.2 {
             return fail("bounds must be at least 0.2 m on each side".into());
@@ -421,7 +430,7 @@ impl Map {
             return fail(format!("The navigation grid would have {cells} cells; the limit is {CELLS}. Enlarge nav.cell or shrink bounds"));
         }
 
-        let mut map = Map { name, theme, mode, build, respawn, respawn_given, cabinets, bounds, cell, clearance, starts: vec![], spawns: vec![], pickups: vec![], blocks: vec![], decks: vec![], ramps: vec![], sinks: vec![], props: vec![], loose: vec![], order: vec![], zones: vec![] };
+        let mut map = Map { name, theme, mode, build, respawn, respawn_given, cabinets, floor, bounds, cell, clearance, starts: vec![], spawns: vec![], pickups: vec![], blocks: vec![], decks: vec![], ramps: vec![], sinks: vec![], props: vec![], loose: vec![], order: vec![], zones: vec![] };
         let team = |v: Option<&Value>, path: &str| choice(v, path, &TEAMS, None).map(|name| TEAMS.iter().position(|team| *team == name).unwrap_or(0));
         for (index, item) in list(input, "starts", 1, 16)?.iter().enumerate() {
             let path = format!("starts[{index}]");
@@ -548,6 +557,7 @@ impl Map {
     pub fn version(&self) -> f64 {
         let late = |style: &str| STYLES[FIRST_STYLES..].contains(&style);
         let newer = self.cabinets
+            || self.floor
             || !self.sinks.is_empty()
             || self.blocks.iter().any(|b| KITS[FIRST_KITS..].contains(&b.style.as_str()) || late(&b.style))
             || self.decks.iter().any(|d| late(&d.style))
@@ -802,6 +812,9 @@ impl Map {
         if self.cabinets {
             lines.push(("cabinets", "true".into()));
         }
+        if self.floor {
+            lines.push(("floor", "true".into()));
+        }
         lines.push(("bounds", js_list(&self.bounds)));
         lines.push(("nav", js_object(&[("cell", js_number(self.cell)), ("clearance", js_number(self.clearance))])));
         let point = |p: &[f64; 2]| js_list(p);
@@ -919,6 +932,9 @@ pub struct Level {
     ramps: Vec<[f64; 8]>,
     /// rect, depth
     sinks: Vec<[f64; 5]>,
+    /// The box props as shots see them: rect, then the world-space heights of their underside and their top. A box is
+    /// solid to shots (and blasts) but not to bodies: a hotdog walks under one (a table top, a den: titan.rs).
+    boxes: Vec<[f64; 6]>,
     search: Search,
     /// For each navigation cell, the number of its region: the group of clear cells that routes can join it
     /// to (by the moves `path` makes). 0 for a blocked cell.
@@ -1038,7 +1054,15 @@ impl Level {
         }).collect();
         let regions = regions(&blocked, cols, rows);
         let fort = map.fortress();
-        Level { map, x0, z0, x1, z1, cell, cols, rows, blocked, walls, solids, decks, ramps, sinks, search: Search::default(), regions, fort }
+        let boxes = map
+            .props
+            .iter()
+            .filter_map(|prop| match prop {
+                Prop::Box { rect, base, height, .. } => Some([rect[0], rect[1], rect[2], rect[3], FLOOR + base, FLOOR + (base + height)]),
+                _ => None,
+            })
+            .collect();
+        Level { map, x0, z0, x1, z1, cell, cols, rows, blocked, walls, solids, decks, ramps, sinks, boxes, search: Search::default(), regions, fort }
     }
     /// A Forts map's level while its forcefield is up: the field stands as one more block, the last, of the
     /// greatest height a block may have, so that bodies, routes, shots and loose objects are all stopped by
@@ -1107,13 +1131,20 @@ impl Level {
         let h = self.ground(b[0], b[2]);
         h <= a[1] + STEP && self.walkable(b[0], h.max(b[1]), b[2])
     }
-    /// Distance a shot from o along the unit vector d travels before a block stops it, or the side or floor of a
+    /// Distance a shot from o along the unit vector d travels before a block or a box prop (its whole volume, from its
+    /// underside up: a table top stops a shot from under it and one from above) stops it, or the side or floor of a
     /// sink it has gone down into. (The counter top itself is not cover: whatever fires decides where a shot meets
     /// it, as `feast` does with `sunk`.)
     pub fn cover(&self, o: [f64; 3], d: [f64; 3]) -> f64 {
         let mut near = RANGE;
         for s in &self.solids {
             let t = ray_box(o, d, [s[0], FLOOR, s[1]], [s[2], s[4], s[3]]);
+            if t < near {
+                near = t;
+            }
+        }
+        for b in &self.boxes {
+            let t = ray_box(o, d, [b[0], b[4], b[1]], [b[2], b[5], b[3]]);
             if t < near {
                 near = t;
             }
@@ -1427,6 +1458,7 @@ mod tests {
             ("pillow-fort.json", "assets/maps/pillow-fort.json"),
             ("the-whole-kitchen-forts.json", "assets/maps/the-whole-kitchen-forts.json"),
             ("kung-fu-dojo.json", "assets/maps/kung-fu-dojo.json"),
+            ("titans-kitchen.json", "assets/maps/titans-kitchen.json"),
         ] {
             let text = Map::parse(&read(path)).unwrap().to_text();
             assert_eq!(hash(&text), golden["canonical"][name].as_str().unwrap(), "{name}:\n{text}");
@@ -1450,6 +1482,8 @@ mod tests {
             ("the-whole-kitchen-forts.json fielded", kitchen, true),
             // Round decks: the ring and the stand of steamers.
             ("kung-fu-dojo.json", "assets/maps/kung-fu-dojo.json", false),
+            // The kitchen floor: legs, the toe-kick, the box and the stool and their ramps.
+            ("titans-kitchen.json", "assets/maps/titans-kitchen.json", false),
         ] {
             let map = Map::parse(&read(path)).unwrap();
             // A Forts map while its forcefield is up: the field is one more block.
@@ -1460,6 +1494,19 @@ mod tests {
             assert_eq!(grid_hash(&level), expected["grid"].as_str().unwrap(), "{name} grid");
             assert_eq!(ground_hash(&level), expected["ground"].as_str().unwrap(), "{name} ground");
         }
+    }
+
+    /// A box prop stops shots in its whole volume, from under it and from above, and not below its underside (the game's
+    /// and the JavaScript's alike: tools/network/map.test.mjs has the same numbers).
+    #[test]
+    fn a_box_prop_stops_shots_from_under_it_and_from_above_but_not_below_its_underside() {
+        let map = Map::parse(r#"{"format": "hotdog-map", "version": 1, "name": "Table", "bounds": [-2, 2, 2, 4], "starts": [{"p": [-1.5, 3]}], "spawns": [{"p": [1.5, 3]}], "props": [{"kind": "box", "rect": [-0.5, 2.4, 0.5, 2.8], "base": 0.3, "height": 0.05}]}"#).unwrap();
+        let level = Level::new(map);
+        assert!((level.cover([0., FLOOR + 0.1, 2.6], [0., 1., 0.]) - 0.2).abs() < 1e-12, "up from under it");
+        assert!((level.cover([0., FLOOR + 1., 2.6], [0., -1., 0.]) - 0.65).abs() < 1e-12, "down from above");
+        assert!((level.cover([-1., FLOOR + 0.32, 2.6], [1., 0., 0.]) - 0.5).abs() < 1e-12, "into its side");
+        assert_eq!(level.cover([-1., FLOOR + 0.1, 2.6], [1., 0., 0.]), RANGE, "under it");
+        assert!(level.walkable(0., FLOOR, 2.6), "a body walks under it");
     }
 
     #[test]
@@ -1484,7 +1531,7 @@ mod tests {
 
     #[test]
     fn a_bamboo_deck_is_round_its_floor_the_ellipse_inside_its_rect_and_a_map_with_bamboo_is_version_2() {
-        assert_eq!((STYLES[STYLES.len() - 1], FIRST_STYLES, ROUND, KITS[KITS.len() - 1]), ("bamboo", 9, "bamboo", "gong"));
+        assert_eq!((STYLES[9], FIRST_STYLES, ROUND, KITS[13]), ("bamboo", 9, "bamboo", "gong"));
         // The same decks as map.test.mjs: a circle 0.8 m across and an ellipse 1 m by 0.5 m.
         let map = edited(|map| {
             map["decks"] = serde_json::json!([{"rect": [-1, 2.4, -0.2, 3.2], "height": 0.03, "style": "bamboo"}, {"rect": [0.2, 2.5, 1.2, 3], "height": 0.04, "style": "bamboo"}]);
@@ -1739,7 +1786,7 @@ mod tests {
     #[test]
     fn a_bad_mode_team_or_zone_is_refused_as_the_server_refuses_it() {
         let reason = |change: fn(&mut Value)| edited(change).unwrap_err().0;
-        assert_eq!(reason(|map| map["mode"] = serde_json::json!("race")), "mode must be one of siege, forts, kungfu");
+        assert_eq!(reason(|map| map["mode"] = serde_json::json!("race")), "mode must be one of siege, forts, kungfu, titan");
         assert_eq!(reason(|map| { map["mode"] = serde_json::json!("forts"); map["build"] = serde_json::json!(2) }), "build must be between 5 and 900");
         assert_eq!(reason(|map| { map["mode"] = serde_json::json!("forts"); map["build"] = Value::Null }), "build must be a number");
         assert_eq!(reason(|map| map["starts"][0]["team"] = serde_json::json!("mayo")), "starts[0].team must be one of mustard, ketchup");
@@ -1793,7 +1840,7 @@ mod tests {
         assert_eq!(reason(|m| m["cabinets"] = serde_json::json!("yes")), "cabinets must be true or false");
         assert_eq!(reason(|m| m["sinks"] = serde_json::json!([{"rect": [0, 3, 0.4, 3.3], "depth": 0.6}])), "sinks[0].depth must be between 0.05 and 0.5");
         assert_eq!(reason(|m| m["ramps"][0]["base"] = serde_json::json!(-0.6)), "ramps[0].base must be between -0.5 and 3");
-        assert_eq!(reason(|m| m["ramps"][0]["style"] = serde_json::json!("toaster")), "ramps[0].style must be one of steel, stone, wood, dark, white, red, green, yellow, metal, bamboo");
+        assert_eq!(reason(|m| m["ramps"][0]["style"] = serde_json::json!("toaster")), "ramps[0].style must be one of steel, stone, wood, dark, white, red, green, yellow, metal, bamboo, card");
         assert_eq!(reason(|m| m["blocks"][2]["style"] = serde_json::json!("blender")).split(" must").next(), Some("blocks[2].style"));
         assert_eq!(reason(|m| m["props"] = serde_json::json!([{"kind": "sofa", "p": [0, 3]}])), "props[0].kind must be one of box, turret, bowl, crate, pillow, napkin, chair, tray, cereal, cup, plate, tin, board, dish, roll, salt, pepper, breadbox, bin");
         // A blanket, by its old name, is read as the napkin it is now.
@@ -1841,5 +1888,125 @@ mod tests {
         assert_eq!(level.cover([-2., FLOOR + 0.1, 2.3], [1., 0., 0.]), RANGE, "over the counter it is as it was");
         assert!(level.sunk(0., 3.3) && !level.sunk(0., 3.));
         assert!(!Level::new(Map::bundled()).sunken() && level.sunken());
+    }
+
+    // ----- Titan's Kitchen: the kitchen floor at night, Titan mode's arena (tools/titans-kitchen.mjs lays it out).
+    fn titans() -> Map {
+        Map::parse(&read("assets/maps/titans-kitchen.json")).unwrap()
+    }
+
+    #[test]
+    fn the_kitchen_floor_the_card_style_and_the_floor_kits_are_version_2_and_read_back_as_written() {
+        assert_eq!((STYLES[STYLES.len() - 1], &KITS[KITS.len() - 3..]), ("card", &["fridge", "oven", "pet-bowl"][..]));
+        let floor = edited(|m| m["floor"] = serde_json::json!(true)).unwrap();
+        assert!(floor.floor && floor.version() == 2. && floor.to_text().contains("\n  \"floor\": true,\n  \"bounds\""));
+        assert_eq!(Map::parse(&floor.to_text()).unwrap(), floor);
+        assert_eq!(edited(|m| m["floor"] = serde_json::json!(false)).unwrap().to_text(), Map::bundled().to_text(), "off, it says nothing");
+        assert_eq!(edited(|m| m["floor"] = serde_json::json!(1)).unwrap_err().0, "floor must be true or false");
+        assert_eq!(edited(|m| m["decks"][0]["style"] = serde_json::json!("card")).unwrap().version(), 2.);
+        for kit in ["fridge", "oven", "pet-bowl"] {
+            let map = edited(|m| m["blocks"][2]["style"] = serde_json::json!(kit)).unwrap();
+            assert_eq!((map.version(), map.blocks[2].facing), (2., Some(Side::MinusZ)), "{kit}");
+        }
+    }
+
+    #[test]
+    fn titans_kitchen_is_made_for_titan_and_the_gun_modes_that_fit_it_play_there_too() {
+        use crate::rules::Mode;
+        let map = titans();
+        assert_eq!((map.name.as_str(), map.mode.as_str(), map.theme.as_str(), map.floor, map.version()), ("Titan's Kitchen", crate::titan::MODE, "night", true, 2.));
+        assert_eq!(Mode::made_for(&map), Mode::Titan);
+        assert_eq!(map.modes(), [Mode::Siege, Mode::Ffa, Mode::Cards, Mode::Titan]);
+        assert!(map.refuses(Mode::Forts).is_some() && map.refuses(Mode::KungFu).is_some());
+        // No other map has the titan layout.
+        let folder = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/maps");
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            let other = Map::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(other.refuses(Mode::Titan).is_none(), other == map, "{}", path.display());
+        }
+        // The editor's numbers for the titan's body (map.mjs TITAN) are titan.rs's.
+        let script = read("tools/network/map.mjs");
+        let line = script.lines().find(|line| line.starts_with("export const TITAN={")).expect("map.mjs exports TITAN");
+        let number = |key: &str| line.split(&format!("{key}:")).nth(1).and_then(|rest| rest.split([',', '}']).next()).and_then(|n| n.parse::<f32>().ok()).unwrap();
+        assert!((number("radius") - crate::titan::RADIUS).abs() < 1e-5 && (number("tall") - crate::titan::TALL).abs() < 1e-5, "{line}");
+        // It fits in the room the game draws round a floor (its walls are the bounds), well away from the counter maps' kitchen.
+        let [x0, z0, x1, z1] = map.bounds;
+        assert!(x1 - x0 >= 5. && z1 - z0 >= 4. && z1 <= -5., "{:?}", map.bounds);
+    }
+
+    #[test]
+    fn in_titans_kitchen_the_titan_walks_all_the_open_floor_and_none_of_the_dens() {
+        use crate::titan::{Footing, RADIUS};
+        let map = titans();
+        let footing = Footing::of(&Level::new(map.clone()));
+        // The titan's start (the first) stands in the open, well clear of everything.
+        let [sx, sz] = map.starts[0].p.map(|v| v as f32);
+        for (dx, dz) in [(0.15, 0.), (-0.15, 0.), (0., 0.15), (0., -0.15)] {
+            assert!(footing.clear(sx + dx, sz + dz), "the titan's start is {RADIUS} + 0.15 m clear");
+        }
+        // Every spot its middle fits is joined to its start (four-connected on a 4 cm grid): no pocket it could be stuck in or never reach.
+        let [x0, z0, x1, z1] = map.bounds.map(|v| v as f32);
+        let step = 0.04;
+        let (cols, rows) = (((x1 - x0) / step).round() as usize, ((z1 - z0) / step).round() as usize);
+        let centre = |id: usize| (x0 + ((id % cols) as f32 + 0.5) * step, z0 + ((id / cols) as f32 + 0.5) * step);
+        let clear: Vec<bool> = (0..cols * rows).map(|id| { let (x, z) = centre(id); footing.clear(x, z) }).collect();
+        let first = ((sz - z0) / step) as usize * cols + ((sx - x0) / step) as usize;
+        let (mut seen, mut open) = (vec![false; clear.len()], vec![first]);
+        seen[first] = true;
+        while let Some(id) = open.pop() {
+            let i = id % cols;
+            for next in [(i > 0).then(|| id - 1), (i + 1 < cols).then(|| id + 1), id.checked_sub(cols), Some(id + cols)].into_iter().flatten() {
+                if next < clear.len() && clear[next] && !seen[next] {
+                    seen[next] = true;
+                    open.push(next);
+                }
+            }
+        }
+        let fits = clear.iter().filter(|c| **c).count();
+        assert_eq!(seen.iter().filter(|s| **s).count(), fits, "every spot the titan fits is joined to its start");
+        assert!(fits as f32 * step * step > 8., "{} m² for the titan's middle", fits as f32 * step * step);
+        // No den holds it: under the table, the chairs, the sideboard, the stool and the cabinets' fronts over the toe-kick it never fits, while a
+        // small hotdog walks in (the navigation grid is clear there, and no block stands in the way).
+        let level = Level::new(map.clone());
+        let dens: Vec<[f64; 4]> = map.props.iter().filter_map(|p| match p { Prop::Box { rect, base, .. } if *base >= 0.17 && *base < 0.8 => Some(*rect), _ => None }).collect();
+        assert!(dens.len() >= 12 && footing.dens.len() >= dens.len());
+        for den in dens {
+            let mut under = 0;
+            let (mut x, mut walked) = (den[0], false);
+            while x <= den[2] {
+                let mut z = den[1];
+                while z <= den[3] {
+                    assert!(!footing.clear(x as f32, z as f32), "the titan fits at ({x}, {z}) under {den:?}");
+                    if level.clear(x, z) && level.walkable(x, FLOOR, z) {
+                        under += 1;
+                        walked = true;
+                    }
+                    z += 0.01;
+                }
+                x += 0.01;
+            }
+            assert!(walked && under > 0, "a small hotdog walks in under {den:?}");
+        }
+    }
+
+    #[test]
+    fn in_titans_kitchen_the_small_bots_reach_every_start_and_pickup() {
+        let mut level = Level::new(titans());
+        let from = level.map.starts[1].p;
+        let items: Vec<[f64; 2]> = level.map.starts.iter().map(|s| s.p).chain(level.map.pickups.iter().map(|p| p.p)).collect();
+        let mut climbs = 0;
+        for p in items {
+            let ground = level.ground(p[0], p[1]);
+            assert!(level.walkable(p[0], ground, p[1]), "{p:?} stands clear");
+            if ground > FLOOR {
+                // Up on the cardboard box or the step stool: a ramp leads up from the floor.
+                assert!(level.climb_goal([from[0], FLOOR, from[1]], [p[0], ground, p[1]]).is_some(), "{p:?} has a ramp up");
+                climbs += 1;
+                continue;
+            }
+            assert!(level.joined(from, p) && !level.path(from, p).is_empty(), "a route to {p:?}");
+        }
+        assert_eq!(climbs, 2, "the ammunition on the box and the sniper on the stool");
     }
 }

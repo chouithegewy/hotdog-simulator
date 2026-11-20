@@ -119,11 +119,14 @@ pub struct ArenaBounds {
     pub floor: f32,
     /// Height of the underside of the ceiling.
     pub ceiling: f32,
+    /// The map stands in a room of its own, its ground the kitchen floor (`Map::floor`, floor.rs), which lights itself
+    /// (the moon through its window, the fridge): the theme leaves out its disc on the ceiling, its rays and its lamps.
+    pub room: bool,
 }
 
 impl Default for ArenaBounds {
     fn default() -> Self {
-        Self { min: Vec2::new(-1.8, 2.27), max: Vec2::new(1.8, 3.63), floor: 0.9025, ceiling: 2.55 }
+        Self { min: Vec2::new(-1.8, 2.27), max: Vec2::new(1.8, 3.63), floor: 0.9025, ceiling: 2.55, room: false }
     }
 }
 
@@ -669,15 +672,19 @@ fn apply_theme(
         .build(),
         Transform::from_translation(sun).looking_to(sunlight, Vec3::Y),
         // Without shadows or tone mapping headroom the full sun would bleach a software-rendered scene.
-        IntroScaled(look.lux * if quality == Quality::Minimal { 0.5 } else { 1. }),
+        // (A room of its own is lit by its own moon through its window: the theme's sun is out there.)
+        IntroScaled(look.lux * if quality == Quality::Minimal { 0.5 } else { 1. } * if bounds.room { 0. } else { 1. }),
         ThemeOwned,
     ));
     if quality == Quality::Full {
         light.insert(VolumetricLight);
     }
 
-    // The disc itself: a shallow glowing dome on the ceiling, far brighter than anything else in view.
+    // The disc itself: a shallow glowing dome on the ceiling, far brighter than anything else in view. (Not in a room of
+    // its own, which has its own light: neither are its corona, its rays or the lamps below.)
     let dome = meshes.add(Sphere::new(1.).mesh().uv(48, 16));
+    let room = bounds.room;
+    if !room {
     commands.spawn((
         Mesh3d(dome.clone()),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -691,6 +698,7 @@ fn apply_theme(
         Surveyed,
         ThemeOwned,
     ));
+    }
 
     let mut strand = |commands: &mut Commands, mesh: Filaments, material: FilamentMaterial| {
         if mesh.len() == 0 {
@@ -711,7 +719,9 @@ fn apply_theme(
     if quality != Quality::Minimal {
         corona.push(sun - Vec3::Y * 0.03, sun - Vec3::Y * 0.031, SUN_RADIUS * 5.5, 0.05, 0.5, filaments::Shape::Sprite);
     }
-    strand(&mut commands, corona, filament_material(look.corona, [1.7, 0.45, 0., 0.], [0.05, 0.3, 0.85, 1.], 0.));
+    if !room {
+        strand(&mut commands, corona, filament_material(look.corona, [1.7, 0.45, 0., 0.], [0.05, 0.3, 0.85, 1.], 0.));
+    }
 
     // The beam, as thousands of separate hair-thin rays from the disc to the counter. Temporal
     // anti-aliasing resolves a ray narrower than a pixel; without it a ray is drawn a full pixel wide.
@@ -733,7 +743,9 @@ fn apply_theme(
             })
             .collect();
         let beam = filaments::sunbeam(rays(5000, 2400, 400), sun, SUN_RADIUS * 0.92, low, high, &pools, 9);
-        strand(&mut commands, beam, filament_material(look.rays, [1.3, 0.55, 0., 0.], [0.35, 1.3, 0.7, thinnest], 1.8));
+        if !room {
+            strand(&mut commands, beam, filament_material(look.rays, [1.3, 0.55, 0., 0.], [0.35, 1.3, 0.7, thinnest], 1.8));
+        }
     }
 
     // Glints: flecks of reflected light scattered over the counter, each twinkling on its own.
@@ -833,6 +845,9 @@ fn apply_theme(
         }
     };
     let drifting = theme == Theme::Jungle;
+    if room {
+        (beads, lamps) = (vec![], vec![]);
+    }
     let stars = filaments::sparkles(&beads, tier(10, 6, 0), bead_size * 1.6, bead_size, 17);
     strand(
         &mut commands,
@@ -953,7 +968,8 @@ fn dress_cameras(
                 color: look.haze,
                 directional_light_color: look.glow,
                 directional_light_exponent: 12.,
-                falloff: FogFalloff::Exponential { density: look.density },
+                // (A room of its own is several metres across: its haze thinner, or its far side would be lost in it.)
+                falloff: FogFalloff::Exponential { density: look.density * if stage.applied.is_some_and(|(_, bounds, _)| bounds.room) { 0.25 } else { 1. } },
             });
         } else {
             camera.remove::<DistanceFog>();
@@ -1161,7 +1177,8 @@ fn tune_room_lights(
     theme: Res<Theme>,
     game: Option<Res<crate::arena::Game>>,
     detail: Option<Res<Detail>>,
-    mut spots: Query<(Entity, &mut SpotLight, Option<&Baseline>, Option<&mut Visibility>, Has<crate::fridge::RoomLamp>), Without<ThemeOwned>>,
+    // (The kitchen floor's moon and fridge keep their own brightness: floor.rs.)
+    mut spots: Query<(Entity, &mut SpotLight, Option<&Baseline>, Option<&mut Visibility>, Has<crate::fridge::RoomLamp>), (Without<ThemeOwned>, Without<crate::floor::Lamp>)>,
     mut points: Query<
         (Entity, &mut PointLight, Option<&Baseline>, Option<&mut Visibility>, Has<crate::fridge::RoomLamp>),
         (
@@ -1171,6 +1188,7 @@ fn tune_room_lights(
             Without<crate::maya::TaskLamp>,
             // A stimmed hotdog's glow keeps the brightness its stim gives it (player_model/stim.rs).
             Without<crate::player_model::stim::StimLight>,
+            Without<crate::floor::Lamp>,
         ),
     >,
 ) {
@@ -1214,6 +1232,13 @@ fn tune_room_lights(
     }
 }
 
+/// How many times the theme's flat fill a room of its own gets: drawn in high dynamic range with the full feature set
+/// (High: its occlusion and marched fog take more of it back), in high dynamic range with the WebGL 2 set (Medium), without
+/// it but with the reflected room (Low), and with neither (Lowest); and its colour there. Set by looking at
+/// the room at each level, natively and in a browser.
+pub const ROOM_AMBIENT: [f32; 4] = [12., 7., 2.5, 5.];
+pub const ROOM_TINT: Color = Color::srgb(0.42, 0.5, 0.82);
+
 /// Raises the theme's light as the refrigerator door opens in the intro, and holds it at full once the
 /// round is on. Before that the camera is shut in the fridge, which the theme must leave dark.
 fn follow_intro(
@@ -1224,6 +1249,8 @@ fn follow_intro(
     mut suns: Query<(&IntroScaled, &mut DirectionalLight)>,
     mut lamps: Query<(&IntroScaled, &mut PointLight)>,
     mut cameras: Query<(&mut Camera, &mut AmbientLight, Option<&mut EnvironmentMapLight>), With<Dressed>>,
+    bounds: Option<Res<ArenaBounds>>,
+    detail: Option<Res<Detail>>,
 ) {
     let open = if game.is_some_and(|g| g.playing()) {
         1.
@@ -1246,9 +1273,27 @@ fn follow_intro(
         }
     }
     let beyond = look.haze.to_linear() * open;
+    // A room of its own (`ArenaBounds::room`, floor.rs) is shut in by its walls and ceiling: what the theme's sky would
+    // bounce into it is raised (`ROOM_AMBIENT`), so that walls, cabinets and furniture stay dark blue against darker at
+    // every level rather than black on black. It costs nothing per light.
+    let room = bounds.is_some_and(|b| b.room);
+    let (hdr, full) = detail.as_ref().map_or((true, true), |d| (d.hdr, d.tier == Quality::Full));
     for (mut camera, mut ambient, environment) in &mut cameras {
-        if ambient.brightness != look.nits * open {
-            ambient.brightness = look.nits * open;
+        let lift = match (room, hdr, environment.is_some()) {
+            (false, ..) => 1.,
+            (true, true, _) if full => ROOM_AMBIENT[0],
+            (true, true, _) => ROOM_AMBIENT[1],
+            (true, false, true) => ROOM_AMBIENT[2],
+            (true, false, false) => ROOM_AMBIENT[3],
+        };
+        // (Moonlight thrown about a room is greyer than the night sky's blue.)
+        let tint = if room { ROOM_TINT } else { look.ambient };
+        if ambient.color != tint {
+            ambient.color = tint;
+        }
+        let nits = look.nits * open * lift;
+        if ambient.brightness != nits {
+            ambient.brightness = nits;
         }
         if let Some(mut environment) = environment {
             if environment.intensity != look.environment * open {

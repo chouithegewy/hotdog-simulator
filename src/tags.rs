@@ -14,6 +14,9 @@
 //!   an eaten one shows nothing ([`wear`]). The player's own hotdog has none, alive (the camera is in
 //!   its head) or dead (the death camera watches its body, and needs no label on it); the death camera
 //!   sees everybody else's, and the spectator and the demo everybody's.
+//! * Titan: the giant wears none (a tag sized for a hotdog would sit at its ankles, and the boss bar across the top
+//!   names it); to the giant's player the small hotdogs' tags reach across the whole room ([`reach`]), the way it
+//!   finds specks on the floor, with the rings round their feet (titan/camera.rs).
 //! * The player's own health, which it cannot see over its own head, is the head-up display's (hud.rs): a heart, a
 //!   bar and a number in the bottom-left corner.
 //!
@@ -36,9 +39,12 @@ const MAX_PX: f32 = 15.;
 /// hotdog standing about a boundary does not flicker between two.
 const HYSTERESIS: f32 = 0.7;
 /// Tags fade out between these distances from the eye, in metres (the siege's counter is 3.6 m long,
-/// the Forts map 6 m).
+/// the Forts map 6 m); and to the titan's player, across Titan's Kitchen (7.2 m by 6 m, its eye 1.7 m up: 9.6 m from
+/// corner to corner).
 const FADE: f32 = 3.6;
 const FAR: f32 = 4.6;
+const GIANT_FADE: f32 = 10.;
+const GIANT_FAR: f32 = 11.5;
 /// A tag this close in front of the eye, or behind it, is not drawn.
 const NEAR: f32 = 0.06;
 /// Seconds a hotdog that has just died shows OUT, and the seconds that then takes to fade.
@@ -100,10 +106,10 @@ pub enum Show {
 }
 /// Which tag a hotdog wears, and how much of it shows: nothing over the player's own hotdog (`own`),
 /// played from inside it while it lives and watched from the death camera once it is dead, nothing over
-/// a hotdog that has been eaten, OUT for a moment over one that has just died (`dead_for` seconds ago),
-/// and otherwise its health.
-pub fn wear(own: bool, alive: bool, consumed: bool, dead_for: f32) -> (Show, f32) {
-    if consumed || own {
+/// the titan (`titan`: the boss bar names it), nothing over a hotdog that has been eaten, OUT for a moment over one
+/// that has just died (`dead_for` seconds ago), and otherwise its health.
+pub fn wear(own: bool, titan: bool, alive: bool, consumed: bool, dead_for: f32) -> (Show, f32) {
+    if consumed || own || titan {
         return (Show::Nothing, 0.);
     }
     if alive {
@@ -125,9 +131,11 @@ pub fn size(distance: f32, shown: f32) -> f32 {
     }
 }
 
-/// How much of a tag shows at `distance` metres from the eye: all of it out to FADE, none beyond FAR.
-pub fn reach(distance: f32) -> f32 {
-    (1. - (distance - FADE) / (FAR - FADE)).clamp(0., 1.)
+/// How much of a tag shows at `distance` metres from the eye: all of it out to FADE, none beyond FAR; to the titan's
+/// player (`giant`), out to GIANT_FADE and GIANT_FAR.
+pub fn reach(distance: f32, giant: bool) -> f32 {
+    let (fade, far) = if giant { (GIANT_FADE, GIANT_FAR) } else { (FADE, FAR) };
+    (1. - (distance - fade) / (far - fade)).clamp(0., 1.)
 }
 
 /// The colour of a health bar holding `hp` of 100: green when full, amber at half, red when nearly gone.
@@ -352,6 +360,8 @@ fn place(
     let (eye, ahead) = (view.translation(), view.forward());
     let screen = camera.logical_viewport_size().unwrap_or(Vec2::new(1280., 720.));
     let carried = g.roster.iter().find(|p| p.id == g.me()).and_then(|p| usize::try_from(p.carry).ok());
+    let titan = g.feast.titan_id();
+    let giant = !spectator && titan == Some(g.me());
     let mut order = Vec::with_capacity(g.roster.len());
     for p in &g.roster {
         let tag = tags.by.entry(p.id).or_insert_with(|| spawn(&mut commands, p.alive));
@@ -359,7 +369,7 @@ fn place(
             tag.died = now;
         }
         tag.alive = p.alive;
-        let (what, fading) = wear(p.id == g.me() && !spectator, p.alive, p.consumed, now - tag.died);
+        let (what, fading) = wear(p.id == g.me() && !spectator, titan == Some(p.id), p.alive, p.consumed, now - tag.died);
         // Where the body stands; for the dead, where the ragdoll has its middle, a little over the counter.
         let feet = bodies.iter().find(|(gait, _, seen, _)| gait.id() == p.id && seen.get()).map(|(_, at, _, rig)| {
             let lying = rig.filter(|_| !p.alive).and_then(|rig| joints.get(rig.joints().torso).ok());
@@ -390,7 +400,7 @@ fn place(
             .filter(|(left, right, _)| spot.x + extent.x / 2. > *left && spot.x - extent.x / 2. < *right)
             .fold(CEILING * (screen.y / crate::hud::SCALE).clamp(0.8, 4.), |ceiling, (_, _, foot)| ceiling.max(foot + 2.));
         let below = ((spot.y - GAP - extent.y - ceiling) / SHELF).clamp(0., 1.);
-        let wanted = if seen { reach(distance) * fading * below } else { 0. };
+        let wanted = if seen { reach(distance, giant) * fading * below } else { 0. };
         tag.alpha += (wanted - tag.alpha).clamp(-BLINK * dt, BLINK * dt);
         // The size: the name's pixels, and the bar and the padding in proportion. (Filled in while still
         // faded out, so that it is laid out by the time it shows.)
@@ -505,10 +515,35 @@ mod tests {
 
     #[test]
     fn tags_fade_out_far_away() {
-        assert_eq!((reach(0.1), reach(FADE)), (1., 1.));
-        assert_eq!((reach(FAR), reach(FAR + 3.)), (0., 0.));
-        let middle = reach((FADE + FAR) / 2.);
+        assert_eq!((reach(0.1, false), reach(FADE, false)), (1., 1.));
+        assert_eq!((reach(FAR, false), reach(FAR + 3., false)), (0., 0.));
+        let middle = reach((FADE + FAR) / 2., false);
         assert!((middle - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_titan_wears_no_tag_and_its_player_sees_every_small_hotdogs_across_the_room() {
+        // The giant: nothing over it, alive or just dead, to anyone (its own player has none in any case).
+        assert_eq!(wear(false, true, true, false, f32::INFINITY), (Show::Nothing, 0.));
+        assert_eq!(wear(false, true, false, false, 0.).0, Show::Nothing);
+        assert_eq!(wear(true, true, true, false, f32::INFINITY).0, Show::Nothing);
+        // A small hotdog still wears its own, the giant's player looking or not.
+        assert_eq!(wear(false, false, true, false, f32::INFINITY), (Show::Health, 1.));
+        // To the giant's eye, from one corner of Titan's Kitchen to the far one, every small hotdog's tag shows whole;
+        // to a small hotdog's, the counter maps' reach holds.
+        let map = kitchen_sim::map::Map::parse(include_str!("../assets/maps/titans-kitchen.json")).unwrap();
+        let [x0, z0, x1, z1] = map.bounds.map(|v| v as f32);
+        let floor = kitchen_sim::map::FLOOR as f32;
+        let corners = Vec3::new(x0, floor + kitchen_sim::titan::TALL, z0).distance(Vec3::new(x1, floor, z1));
+        assert!(corners > FAR && reach(corners, true) == 1., "{corners} m");
+        assert_eq!(reach(corners, false), 0.);
+        // And nothing in the room hides a small hotdog out on the floor from the giant's eye (in a corner, by the fridge,
+        // by the table: one of the points its tag needs seen is).
+        let feast = Feast::with_map(map, false);
+        let eye = Vec3::new(2.7, floor + kitchen_sim::titan::TALL - 0.1, -7.7);
+        for (x, z) in [(0.3, -10.), (-1.5, -11.5), (2.0, -11.8), (-0.5, -8.5)] {
+            assert!([0.15, 0.08].iter().any(|h| !hidden(&feast, eye, Vec3::new(x, floor + h, z), None)), "({x}, {z})");
+        }
     }
 
     #[test]
@@ -535,22 +570,22 @@ mod tests {
     #[test]
     fn who_wears_what() {
         // Everybody else's health; not the player's own while it lives and is played from its eyes.
-        assert_eq!(wear(false, true, false, f32::INFINITY), (Show::Health, 1.));
-        assert_eq!(wear(true, true, false, f32::INFINITY).0, Show::Nothing);
+        assert_eq!(wear(false, false, true, false, f32::INFINITY), (Show::Health, 1.));
+        assert_eq!(wear(true, false, true, false, f32::INFINITY).0, Show::Nothing);
         // A hotdog that dies shows OUT for a moment, then fades and is gone.
-        assert_eq!(wear(false, false, false, 0.), (Show::Out, 1.));
-        assert_eq!(wear(false, false, false, MARK), (Show::Out, 1.));
-        let (what, left) = wear(false, false, false, MARK + MARK_FADE / 2.);
+        assert_eq!(wear(false, false, false, false, 0.), (Show::Out, 1.));
+        assert_eq!(wear(false, false, false, false, MARK), (Show::Out, 1.));
+        let (what, left) = wear(false, false, false, false, MARK + MARK_FADE / 2.);
         assert!(what == Show::Out && (left - 0.5).abs() < 1e-5);
-        assert_eq!(wear(false, false, false, MARK + MARK_FADE).0, Show::Nothing);
+        assert_eq!(wear(false, false, false, false, MARK + MARK_FADE).0, Show::Nothing);
         // One already dead when it was first seen has no OUT to show.
-        assert_eq!(wear(false, false, false, f32::INFINITY).0, Show::Nothing);
+        assert_eq!(wear(false, false, false, false, f32::INFINITY).0, Show::Nothing);
         // The player's own body, watched from the death camera, has no tag at all, from the moment it dies.
         for dead_for in [0., MARK / 2., MARK, MARK + MARK_FADE / 2., f32::INFINITY] {
-            assert_eq!(wear(true, false, false, dead_for), (Show::Nothing, 0.));
+            assert_eq!(wear(true, false, false, false, dead_for), (Show::Nothing, 0.));
         }
         // Eaten: nothing, at once.
-        assert_eq!(wear(false, false, true, 0.).0, Show::Nothing);
+        assert_eq!(wear(false, false, false, true, 0.).0, Show::Nothing);
     }
 
     #[test]

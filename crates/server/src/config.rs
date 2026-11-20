@@ -6,7 +6,7 @@
 //!   --port P          the one port for everything (8137; 0 picks a free one)
 //!   --map M           what the lobby starts on: a map's file (one from the editor; one that is not in assets/maps
 //!                     can be chosen again under its file's name), a map's name (assets/maps/<name>.json), or random
-//!   --mode siege|forts|ffa|cards|kungfu  the mode the lobby starts on, which is the game's, not the map's
+//!   --mode siege|forts|ffa|cards|kungfu|titan  the mode the lobby starts on, which is the game's, not the map's
 //!                     (kitchen_sim::rules `Mode`): on --map, or on the mode's default map (counter-siege, pillow-fort or
 //!                     kung-fu-dojo), or with --map random the mode Random draws from. A --map that cannot be played in
 //!                     the mode is refused with the reason: Forts needs the Forts layout, the dojo is Kung Fu's alone, and
@@ -81,7 +81,7 @@ pub struct Config {
     pub file: Option<String>,
     pub choice: Option<String>,
     pub random: bool,
-    /// The mode the lobby starts on (--mode: siege, forts, ffa, cards or kungfu), None for the map's own.
+    /// The mode the lobby starts on (--mode: siege, forts, ffa, cards, kungfu or titan), None for the map's own.
     pub mode: Option<String>,
     pub net: Net,
     /// The replays folder and how many it keeps (0: none recorded).
@@ -114,7 +114,7 @@ fn packaged_root() -> Option<PathBuf> {
     resources.join("assets/maps").is_dir().then_some(resources)
 }
 fn usage() -> &'static str {
-    "hotdog-server [--host 127.0.0.1] [--port 8137] [--map <file>|<name>|random] [--mode siege|forts|ffa|cards|kungfu] [--demo]\n              [--countdown S] [--opening S] [--build S] [--stale S] [--root DIR]\n              [--tick HZ] [--send HZ] [--json] [--lag MS] [--jitter MS] [--ping S] [--stats S] [--dev]\n              [--bots easy|normal|hard] [--tune \"mustard.speed=1.1 sniper.speed=12 ...\"]\n              [--replays DIR] [--replays-keep N]"
+    "hotdog-server [--host 127.0.0.1] [--port 8137] [--map <file>|<name>|random] [--mode siege|forts|ffa|cards|kungfu|titan] [--demo]\n              [--countdown S] [--opening S] [--build S] [--stale S] [--root DIR]\n              [--tick HZ] [--send HZ] [--json] [--lag MS] [--jitter MS] [--ping S] [--stats S] [--dev]\n              [--bots easy|normal|hard] [--tune \"mustard.speed=1.1 sniper.speed=12 ...\"]\n              [--replays DIR] [--replays-keep N]"
 }
 /// Reads the command line (without the program's name). An error says what is wrong, as the server prints it.
 pub fn parse(args: &[String]) -> Result<Config, String> {
@@ -147,7 +147,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
     };
     let mode = match value("--mode") {
         None => None,
-        Some(mode) => Some(mode.filter(|m| lobby::PLAYS.contains(&m.as_str())).ok_or("--mode needs siege or forts, ffa for Free For All, kungfu for Kung Fu, or cards for Fully Loaded")?),
+        Some(mode) => Some(mode.filter(|m| lobby::PLAYS.contains(&m.as_str())).ok_or("--mode needs siege or forts, ffa for Free For All, kungfu for Kung Fu, titan for Titan, or cards for Fully Loaded")?),
     };
     let cards = mode.as_deref() == Some(lobby::CARDS);
     let seconds = |key: &str, low: f32| -> Result<Option<f32>, String> {

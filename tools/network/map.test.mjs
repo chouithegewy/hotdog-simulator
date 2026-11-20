@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,existsSync,readdirSync} from 'node:fs';
 import {PRESETS} from './presets.mjs';
-import {FLOOR,RANGE,MapError,MODES,TEAMS,TEAM_NAMES,ZONES,BUILD,KINDS,LIMITS,LOOSE,WEAPONS,AMMO_BOX,RESPAWN,normalize,normalizeItem,stringify,compile,analyze,gridHash,groundHash,fielded,fortress,fortLayout,modes,ROOM,KITS,FIRST_KITS,STYLES,FIRST_STYLES,ROUND,round} from './map.mjs';
+import {FLOOR,RANGE,MapError,MODES,TEAMS,TEAM_NAMES,ZONES,BUILD,KINDS,LIMITS,LOOSE,WEAPONS,AMMO_BOX,RESPAWN,normalize,normalizeItem,stringify,compile,analyze,gridHash,groundHash,fielded,fortress,fortLayout,modes,ROOM,KITS,FIRST_KITS,STYLES,FIRST_STYLES,ROUND,round,TITAN,titanClear,titanWalls,versionOf} from './map.mjs';
+import {build as titansKitchen} from '../titans-kitchen.mjs';
 
 const read=name=>readFileSync(new URL(name,import.meta.url),'utf8');
 const text=read('../../assets/maps/counter-siege.json');
@@ -372,7 +373,7 @@ test('the Forts map is stored in canonical form and has no problems',()=>{
 });
 
 test('a map says its mode: a siege unless it says forts or kungfu, and only a Forts map has a build time',()=>{
-  assert.deepEqual([MODES,TEAMS,ZONES],[['siege','forts','kungfu'],['mustard','ketchup'],['base','field','bacon']]);
+  assert.deepEqual([MODES,TEAMS,ZONES],[['siege','forts','kungfu','titan'],['mustard','ketchup'],['base','field','bacon']]);
   const dojo=normalize(tiny({mode:'kungfu',build:60}));
   assert.deepEqual([dojo.mode,'build' in dojo,compile(dojo).fort],['kungfu',false,null]);
   const siege=normalize(tiny({build:60}));
@@ -445,6 +446,15 @@ test('what a Forts map leaves out is assumed: a field across the middle, bases a
   assert.deepEqual(wide.starts[0],[{p:[.25,1],yaw:-Math.PI/2}]);
 });
 
+test('a box prop stops shots from under it and from above but not below its underside (as kitchen-sim map.rs)',()=>{
+  const level=compile(normalize({format:'hotdog-map',version:1,name:'Table',bounds:[-2,2,2,4],starts:[{p:[-1.5,3]}],spawns:[{p:[1.5,3]}],props:[{kind:'box',rect:[-.5,2.4,.5,2.8],base:.3,height:.05}]}));
+  assert.ok(Math.abs(level.cover([0,FLOOR+.1,2.6],[0,1,0])-.2)<1e-12,'up from under it');
+  assert.ok(Math.abs(level.cover([0,FLOOR+1,2.6],[0,-1,0])-.65)<1e-12,'down from above');
+  assert.ok(Math.abs(level.cover([-1,FLOOR+.32,2.6],[1,0,0])-.5)<1e-12,'into its side');
+  assert.equal(level.cover([-1,FLOOR+.1,2.6],[1,0,0]),RANGE,'under it');
+  assert.equal(level.walkable(0,FLOOR,2.6),true,'a body walks under it');
+});
+
 test('while the forcefield is up it stops routes, steps and shots, and the map itself is unchanged',()=>{
   const map=normalize(fortText),open=compile(map),shut=fielded(map);
   assert.equal(shut.map,map);
@@ -506,11 +516,13 @@ test('the mode is the game\'s: a map with the whole Forts layout can be played a
   const part=normalize(fortEdit(m=>{m.mode='siege';m.zones.splice(3,1)}));
   assert.ok(!fortLayout(part)&&!fortress(part));assert.deepEqual(modes(part),['siege','ffa','cards']);
   assert.deepEqual(codes(fortEdit(m=>{m.mode='siege';m.zones.splice(3,1)})),['warning:zones-partial:zones[0]']);
-  // The bundled maps: Forts on the four Forts maps, the siege and Free For All on all but the dojo, which is Kung Fu's alone.
+  // The bundled maps: Forts on the four Forts maps, the siege and Free For All on all but the dojo, which is Kung Fu's alone; Titan on Titan's Kitchen alone.
   const all=readdirSync(new URL('../../assets/maps/',import.meta.url)).filter(f=>f.endsWith('.json')).map(f=>[f,normalize(read(`../../assets/maps/${f}`))]);
   assert.deepEqual(all.filter(([,m])=>modes(m).includes('forts')).map(([f])=>f).sort(),['jungle-fort.json','moonlit-fort.json','pillow-fort.json','the-whole-kitchen-forts.json']);
   assert.equal(all.filter(([,m])=>modes(m).includes('siege')&&modes(m).includes('ffa')).length,all.length-1);
   assert.deepEqual(modes(all.find(([f])=>f==='kung-fu-dojo.json')[1]),['kungfu']);
+  assert.deepEqual(all.filter(([,m])=>modes(m).includes('titan')).map(([f])=>f),['titans-kitchen.json']);
+  assert.deepEqual(modes(all.find(([f])=>f==='titans-kitchen.json')[1]),['siege','ffa','cards','titan']);
 });
 test('a Forts map with nothing in it yet lists what it needs',()=>{
   const got=codes(edit(m=>{m.mode='forts';m.props=[]}));
@@ -548,7 +560,7 @@ test('the bundled Forts map is stored in canonical form, has no problems and fit
 });
 // ---- The electric griddle: a counter thing of version 2 that is switched on and off and heats (crates/kitchen-sim/src/griddle.rs) ----
 test('a griddle is one of the counter things, a block with a front on the side of its dial, and a map with one is version 2',()=>{
-  assert.equal(KITS.at(-2),'griddle');assert.ok(KITS.indexOf('griddle')>=FIRST_KITS);
+  assert.equal(KITS[12],'griddle');assert.ok(KITS.indexOf('griddle')>=FIRST_KITS);
   const map=edit(m=>{m.blocks.push({rect:[1,3,1.5,3.28],height:.06,style:'griddle'})});
   const norm=normalize(map);
   assert.equal(norm.version,2);
@@ -587,7 +599,7 @@ test('each Forts map has one griddle across the middle by the front of the count
   }
 });
 test('bamboo is the last style, and a deck of it is round: the ellipse inside its rect is its floor, and a map with it is version 2',()=>{
-  assert.deepEqual([STYLES.at(-1),FIRST_STYLES,ROUND,KITS.at(-1)],['bamboo',9,'bamboo','gong']);
+  assert.deepEqual([STYLES[9],FIRST_STYLES,ROUND,KITS[13]],['bamboo',9,'bamboo','gong']);
   const map=normalize(edit(m=>{m.decks=[{rect:[-1,2.4,-.2,3.2],height:.03,style:'bamboo'},{rect:[.2,2.5,1.2,3],height:.04,style:'bamboo'}];m.ramps=[]}));
   assert.equal(map.version,2);assert.equal(normalize(edit(m=>{m.decks[0].style='wood'})).version,1,'the old styles stay version 1');
   assert.equal(normalize(edit(m=>{m.blocks[2].style='bamboo'})).version,2,'so does a block of it');
@@ -678,7 +690,7 @@ test('every bundled map is canonical and problem-free, and its loose objects sta
   const quad=r=>[[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]];
   const touches=(q,c,r)=>edges(q).every(([x,z],i)=>(c[0]-q[i][0])*x+(c[1]-q[i][1])*z<=0)||q.some((a,i)=>{const b=q[(i+1)%4],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((c[0]-a[0])*dx+(c[1]-a[1])*dz)/(dx*dx+dz*dz)));return Math.hypot(a[0]+dx*t-c[0],a[1]+dz*t-c[1])<r});
   const names=readdirSync(new URL('../../assets/maps/',import.meta.url)).filter(name=>name.endsWith('.json')).sort();
-  assert.deepEqual(names,['breakfast-rush.json','counter-siege-v2.json','counter-siege.json','horde-night.json','jungle-fort.json','kung-fu-dojo.json','midnight-snack.json','moonlit-fort.json','overgrown-pantry.json','pillow-fort.json','the-whole-kitchen-forts.json','the-whole-kitchen.json','toaster-alley.json','treetop-decks.json']);
+  assert.deepEqual(names,['breakfast-rush.json','counter-siege-v2.json','counter-siege.json','horde-night.json','jungle-fort.json','kung-fu-dojo.json','midnight-snack.json','moonlit-fort.json','overgrown-pantry.json','pillow-fort.json','the-whole-kitchen-forts.json','the-whole-kitchen.json','titans-kitchen.json','toaster-alley.json','treetop-decks.json']);
   for(const name of names){
     const text=read(`../../assets/maps/${name}`),map=normalize(text),issues=analyze(compile(map)).issues.map(i=>i.code);
     assert.equal(stringify(map),text,`${name} is canonical`);
@@ -703,7 +715,8 @@ test('grid fingerprints match the committed golden file shared with the Rust tes
   const golden=new URL('./fixtures/map-golden.json',import.meta.url);
   const actual={};
   // (The Whole Kitchen has a sink, with its rim and the ramps out of it.)
-  for(const name of ['../../assets/maps/counter-siege.json','./fixtures/awkward.json','../../assets/maps/pillow-fort.json','../../assets/maps/the-whole-kitchen-forts.json','../../assets/maps/kung-fu-dojo.json']){
+  // (Titan's Kitchen: the kitchen floor, its legs, the toe-kick and the climbs.)
+  for(const name of ['../../assets/maps/counter-siege.json','./fixtures/awkward.json','../../assets/maps/pillow-fort.json','../../assets/maps/the-whole-kitchen-forts.json','../../assets/maps/kung-fu-dojo.json','../../assets/maps/titans-kitchen.json']){
     const l=compile(normalize(read(name)));
     actual[name.split('/').at(-1)]={cols:l.cols,rows:l.rows,grid:gridHash(l),ground:groundHash(l)};
   }
@@ -711,7 +724,7 @@ test('grid fingerprints match the committed golden file shared with the Rust tes
   for(const name of ['pillow-fort.json','the-whole-kitchen-forts.json']){const l=fielded(normalize(read(`../../assets/maps/${name}`)));actual[`${name} fielded`]={cols:l.cols,rows:l.rows,grid:gridHash(l),ground:groundHash(l)}}
   // The canonical text, which the Rust server writes (map.rs `to_text`) and sends its clients: an FNV-1a hash of its UTF-8 bytes.
   const textHash=text=>{let h=0x811c9dc5;for(const byte of Buffer.from(text,'utf8'))h=Math.imul(h^byte,0x01000193)>>>0;return h.toString(16).padStart(8,'0')};
-  actual.canonical=Object.fromEntries(['./fixtures/awkward.json','./fixtures/uncanonical.json','../../assets/maps/pillow-fort.json','../../assets/maps/the-whole-kitchen-forts.json','../../assets/maps/kung-fu-dojo.json'].map(name=>[name.split('/').at(-1),textHash(stringify(normalize(read(name))))]));
+  actual.canonical=Object.fromEntries(['./fixtures/awkward.json','./fixtures/uncanonical.json','../../assets/maps/pillow-fort.json','../../assets/maps/the-whole-kitchen-forts.json','../../assets/maps/kung-fu-dojo.json','../../assets/maps/titans-kitchen.json'].map(name=>[name.split('/').at(-1),textHash(stringify(normalize(read(name))))]));
   if(process.env.UPDATE_GOLDEN==='1'||!existsSync(golden))writeFileSync(golden,JSON.stringify(actual,null,2)+'\n');
   assert.deepEqual(actual,JSON.parse(readFileSync(golden,'utf8')));
 });
@@ -738,3 +751,84 @@ test('a sink is a basin: its floor is ground below the counter, its rim keeps ro
   assert.deepEqual(level.spawnPosition(0)[1],FLOOR);
 });
 
+
+// ----- Titan's Kitchen: the kitchen floor at night, Titan mode's arena (tools/titans-kitchen.mjs lays it out).
+test('the kitchen floor, the card style and the floor kits are version 2 things, read and written back as the game reads them',()=>{
+  assert.deepEqual([STYLES.at(-1),KITS.slice(-3)],['card',['fridge','oven','pet-bowl']]);
+  const floor=normalize(edit(m=>{m.floor=true}));
+  assert.equal(floor.floor,true);assert.equal(floor.version,2);assert.ok(stringify(floor).includes('\n  "floor": true,\n  "bounds"'));
+  assert.ok(!('floor' in normalize(edit(m=>{m.floor=false}))),'off, it is not written');
+  assert.throws(()=>normalize(edit(m=>{m.floor='yes'})),/floor must be true or false/);
+  assert.equal(versionOf(normalize(edit(m=>{m.decks[0].style='card'}))),2);
+  for(const kit of ['fridge','oven','pet-bowl']){
+    const map=normalize(edit(m=>{m.blocks.push({rect:[1,3,1.3,3.3],height:.5,style:kit})}));
+    assert.deepEqual([map.version,map.blocks.at(-1).facing],[2,'-z'],kit);
+  }
+});
+test("Titan's Kitchen is what its generator lays out: the floor of the kitchen at night, made for Titan, its first start the titan's in the open and eight more round the edge",()=>{
+  const text=read('../../assets/maps/titans-kitchen.json'),map=normalize(text);
+  assert.equal(titansKitchen().text,text,'node tools/titans-kitchen.mjs --write');
+  assert.deepEqual([map.name,map.mode,map.theme,map.floor,map.version],["Titan's Kitchen",'titan','night',true,2]);
+  assert.ok(titanClear(map,...map.starts[0].p,TITAN.clear),'the titan starts in the open');
+  assert.ok(map.starts.length>=9);
+  for(const start of map.starts.slice(1)){
+    assert.ok(Math.hypot(start.p[0]-map.starts[0].p[0],start.p[1]-map.starts[0].p[1])>=2,`${start.p} is two metres from the titan`);
+    const [x0,z0,x1,z1]=map.bounds,edge=Math.min(start.p[0]-x0,x1-start.p[0],start.p[1]-z0,z1-start.p[1]);
+    assert.ok(edge<=1.6,`${start.p} is round the edge`);
+  }
+  // 5 m by 4 m of the tile floor hold nothing but furniture on legs: no deck, ramp or sink, and no block thicker than a leg.
+  const open=[-2.5,-12,2.5,-8],inside=r=>r[0]<open[2]&&r[2]>open[0]&&r[1]<open[3]&&r[3]>open[1];
+  assert.ok(open[2]-open[0]>=5&&open[3]-open[1]>=4);
+  assert.deepEqual([...map.decks,...map.ramps].filter(item=>inside(item.rect)),[]);
+  assert.deepEqual(map.blocks.filter(b=>inside(b.rect)&&Math.min(b.rect[2]-b.rect[0],b.rect[3]-b.rect[1])>.07),[]);
+  // The titan's body, 1.8 m tall, never reaches a box it would bump its head on: every box is below it (the ceiling, 2.7 m up, is the game's).
+  assert.ok(map.props.every(p=>p.kind!=='box'||p.base<TITAN.tall));
+});
+test("in Titan's Kitchen the titan reaches all the open floor and none of the dens, and the small hotdogs reach every start and pickup",()=>{
+  const map=normalize(read('../../assets/maps/titans-kitchen.json')),walls=titanWalls(map),[x0,z0,x1,z1]=map.bounds,step=.05;
+  const cols=Math.round((x1-x0)/step),rows=Math.round((z1-z0)/step),clear=new Uint8Array(cols*rows);
+  const centre=id=>[x0+(id%cols+.5)*step,z0+(Math.floor(id/cols)+.5)*step];
+  for(let id=0;id<clear.length;id++)clear[id]=titanClear(map,...centre(id),0,walls)?1:0;
+  // One region: from its start the titan can walk to every spot its body fits (four-connected, so it never squeezes between two corners).
+  const seen=new Uint8Array(clear.length),first=Math.floor((map.starts[0].p[1]-z0)/step)*cols+Math.floor((map.starts[0].p[0]-x0)/step),queue=[first];seen[first]=1;
+  while(queue.length){const id=queue.pop(),i=id%cols;for(const next of [i>0?id-1:-1,i<cols-1?id+1:-1,id-cols,id+cols])if(next>=0&&next<clear.length&&clear[next]&&!seen[next]){seen[next]=1;queue.push(next)}}
+  let fits=0,reached=0;for(let id=0;id<clear.length;id++){fits+=clear[id];reached+=seen[id]}
+  assert.equal(reached,fits,'every spot the titan fits is joined to its start');
+  assert.ok(fits*step*step>8,`${(fits*step*step).toFixed(1)} m² of floor for the titan's centre`);
+  // No den holds a spot for it: under every box (the table, the chairs, the sideboard, the stool, the cabinets' fronts over the toe-kick) the titan never fits.
+  const dens=map.props.filter(p=>p.kind==='box');
+  assert.ok(dens.length>=12);
+  for(const den of dens){
+    const [a,b,c,d]=den.rect;
+    for(let x=a;x<=c;x+=.02)for(let z=b;z<=d;z+=.02)assert.ok(!titanClear(map,x,z,0,walls),`the titan fits at ${x}, ${z} under the box at ${den.rect}`);
+  }
+  // Every den is a refuge with more than one way out: the small hotdogs can walk in under it from at least two sides.
+  const l=compile(map),{reach}=analyze(l);
+  for(const den of dens.filter(p=>p.base>=.17&&p.base<.8&&p.style!=='stone')){
+    const [a,b,c,d]=den.rect,under=(x,z)=>reach[l.cellIndex(x,z)]&&l.clear(x,z),sides=[];
+    for(const [side,points] of [['-x',[[a-.06,(b+d)/2]]],['+x',[[c+.06,(b+d)/2]]],['-z',[[(a+c)/2,b-.06]]],['+z',[[(a+c)/2,d+.06]]]])if(points.every(([x,z])=>x>x0&&x<x1&&z>z0&&z<z1&&under(x,z)))sides.push(side);
+    let inside=0;for(let x=a+.02;x<c;x+=.02)for(let z=b+.02;z<d;z+=.02)if(under(x,z))inside++;
+    assert.ok(inside>0,`a small hotdog gets in under the box at ${den.rect}`);
+    assert.ok(sides.length>=2||den.rect[3]-den.rect[1]<.2,`the den under ${den.rect} opens on ${sides}`);
+  }
+  // The small hotdogs: every start and pickup on ground a walk (and a ramp) can reach from every start: analyze finds nothing unreachable.
+  assert.deepEqual(analyze(l).issues,[]);
+  for(const [i,item] of [...map.starts,...map.pickups].entries())assert.ok(reach[l.cellIndex(...item.p)],`${i}: ${item.p} is reached`);
+  // Starts and pickups on the floor are joined by routes for the bots' navigation grid; those up on the box and the stool have a ramp up to them.
+  for(const item of [...map.starts,...map.pickups]){
+    if(l.height(...item.p)>0){assert.ok(l.climbGoal([map.starts[1].p[0],FLOOR,map.starts[1].p[1]],[item.p[0],l.ground(...item.p),item.p[1]]),`${item.p} has a ramp up`);continue}
+    assert.ok(l.path(map.starts[1].p,item.p).length>0,`a route from the first small start to ${item.p}`);
+  }
+});
+test('a Titan map wants its titan in the open and starts for the small hotdogs: the editor says so',()=>{
+  const arena=JSON.parse(read('../../assets/maps/titans-kitchen.json'));
+  const codes=map=>analyze(compile(normalize(map))).issues.map(i=>`${i.severity}:${i.code}`);
+  assert.deepEqual(codes(arena),[]);
+  // The titan's start (the first) against the table: cramped.
+  assert.deepEqual(codes({...arena,starts:[{p:[-1.3,-10.6],yaw:0},...arena.starts.slice(1)]}),['error:titan-start-cramped']);
+  // Too few starts for the small hotdogs.
+  assert.deepEqual(codes({...arena,starts:arena.starts.slice(0,4)}),['warning:titan-few-starts','warning:few-starts']);
+  // Another mode's map is not asked any of it.
+  assert.ok(!codes({...arena,mode:'siege'}).some(c=>c.includes('titan')));
+  assert.equal(TITAN.radius+TITAN.clear,.51);
+});

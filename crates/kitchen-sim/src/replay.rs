@@ -3,7 +3,7 @@
 //! Replays: a game as a client received it, kept in a file to be watched again (format 2; format 1 is read too).
 //!
 //! **What is kept.** Not the players' inputs but the stream a client is sent: every frame (net.rs, protocol 12) and
-//! every JSON text message beside them (`{type:'kungfu'}`, `'cards'`, `'griddle'`, `'ammo'`, `'tuning'`, `'map'`),
+//! every JSON text message beside them (`{type:'kungfu'}`, `'titan'`, `'cards'`, `'griddle'`, `'ammo'`, `'tuning'`, `'map'`),
 //! each with the moment it was sent, in milliseconds from the recording's start. Played back through the client's own
 //! frame code, it looks as it did, whatever the simulation's tuning is by then; and the server (crates/server), the
 //! single-player client (which encodes its own `Feast` into the same frames, `snapshot`) and the C interface share it.
@@ -68,7 +68,7 @@ pub const CHUNK_LIMIT: usize = 32 << 20;
 /// The most a header or a summary may inflate to.
 const META_LIMIT: usize = 8 << 20;
 /// The text kinds a chunk's context keeps the latest of.
-pub const CONTEXT: [&str; 6] = ["map", "tuning", "cards", "griddle", "kungfu", "ammo"];
+pub const CONTEXT: [&str; 7] = ["map", "tuning", "cards", "griddle", "kungfu", "ammo", "titan"];
 
 const HEADER: u8 = 1;
 const CHUNK: u8 = 2;

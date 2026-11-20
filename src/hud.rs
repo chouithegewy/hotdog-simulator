@@ -29,6 +29,15 @@
 //!   clock and the leader; the combo's count right of the crosshair, popping with each hit of a chain; a small icon over
 //!   the crosshair for a blow blocked, a parry, a guard broken (bright when it was this player's doing, red when it was
 //!   done to it); and the style's name for a moment when it changes, the only word.
+//! * **Titan** ([`Giant`], kitchen-sim titan.rs): for a small hotdog, the giant's health bar across the top ([`Boss`]:
+//!   its name, the bar, under it the stagger meter its legs fill, a mark while it is on its knees and its weak spot open),
+//!   under it the clock, the reinforcements left as pips, this player's damage to it and weak-spot hits; by the crosshair
+//!   a warning for each move it winds up ([`Tell`]: the move's icon, red when it is coming at this player and amber
+//!   otherwise, a bar running out to the moment it lands, and an arrow round the crosshair to the titan), and a gold
+//!   target with an arrow to the back of its head while it is open to this player ([`Weak`]). For the titan's own player:
+//!   its health (thousands) bottom left with the stagger under it, over them its moves' icons with their cooldowns, and
+//!   at the top the clock, the small hotdogs alive and the pool's pips; no gun, no rounds, no stim. The kill feed shows
+//!   the titan's kills with the move that killed, and every weak-spot hit with its damage.
 //!
 //! Everything is sized from the window's height: SCALE is 720 pixels, and the icons are drawn for the pixels they
 //! take (icons.rs), so they are crisp at any size. Nothing here decides anything: it reads the round as the client
@@ -62,9 +71,14 @@ const BACON: [f32; 3] = [0.98, 0.5, 0.44];
 /// Kung Fu: each style's colour (`kungfu::Style`'s order), chi's, and the iron body's.
 pub const STYLE_RGB: [[f32; 3]; 7] = [[1.0, 0.56, 0.16], [0.86, 0.93, 1.0], [0.42, 0.92, 0.5], [0.32, 0.86, 0.9], [0.98, 0.82, 0.3], [0.96, 0.5, 0.74], [0.68, 0.8, 0.38]];
 const CHI: [f32; 3] = [0.55, 0.82, 1.0];
+/// Titan: the giant's colour (its health bar, its icon in the feed), its stagger's, and the weak spot's.
+pub const TITAN_RGB: [f32; 3] = [0.92, 0.36, 0.22];
+const STAGGER: [f32; 3] = [1.0, 0.66, 0.2];
 const IRON: [f32; 3] = [0.74, 0.82, 0.9];
 /// Seconds a feedback icon stays over the crosshair, and a combo's count pops after a hit.
 pub const FEEL_TIME: f32 = 0.7;
+/// Titan: weak-spot hits from one shooter this close together are one line of the feed.
+pub const WEAK_RUN: f32 = 1.5;
 const POP_TIME: f32 = 0.2;
 
 pub struct Plugin;
@@ -164,6 +178,49 @@ pub struct Fight {
     /// Hits in its combo now (shown from two up).
     pub combo: u32,
 }
+/// Titan: the giant as this player sees it (see the module's documentation).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Giant {
+    /// Its health bar across the top, for the small hotdogs (its own player has its health bottom left instead).
+    pub boss: Option<Boss>,
+    /// The titan's own player: its health, its full health, and the stagger its legs have taken (0 to 1).
+    pub own: Option<(f32, f32, f32)>,
+    /// The reinforcements left, and the pool the round began with (pips).
+    pub reserve: u32,
+    pub pool: u32,
+    /// The warning of the move it winds up or strikes with now (small hotdogs, alive).
+    pub tell: Option<Tell>,
+    /// The weak spot, open to this player (small hotdogs, alive).
+    pub weak: Option<Weak>,
+}
+/// The titan's health bar: its name, health of its full health, the stagger meter (0 to 1), whether it is on its knees
+/// and whether its weak spot is open now.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Boss {
+    pub name: String,
+    pub hp: f32,
+    pub max: f32,
+    pub stagger: f32,
+    pub kneeling: bool,
+    pub exposed: bool,
+}
+/// A move's tell: its icon, the way to the titan (radians clockwise from straight ahead), whether it is coming at this
+/// player, and the seconds left of its wind-up (below 0 while it strikes) of the whole wind-up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tell {
+    pub icon: Icon,
+    pub bearing: f32,
+    pub threat: bool,
+    pub left: f32,
+    pub of: f32,
+}
+/// The weak spot open to this player: which way it is from the crosshair (radians clockwise from up, on the screen),
+/// and whether the crosshair is on it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weak {
+    pub angle: f32,
+    pub on: bool,
+}
 /// A key (its cap's label: "E", "Q") or a mouse button, as a prompt shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -201,6 +258,8 @@ pub struct Show {
     pub moment: Option<Moment>,
     /// Dead: whom the death camera watches.
     pub watching: Option<(String, [f32; 3])>,
+    /// Titan's.
+    pub titan: Option<Giant>,
 }
 
 /// What the display is told besides the round.
@@ -270,12 +329,20 @@ impl Show {
         let alive = me.is_some_and(|p| p.alive);
         let first = alive && !g.demo;
         let tint = |p: &Player| colour(p, forts, cx.colours.get(&p.id).copied());
+        // Titan: is this player the giant?
+        let giant = g.titan.as_ref().is_some_and(|v| v.titan != 0 && v.titan == g.me());
         if first {
             let me = me.unwrap();
             show.health = Some(me.hp.clamp(0., 100.));
             show.abilities = abilities(g, me);
             show.prompts = prompts(g, me, cx);
-            if g.kung_fu() {
+            if let Some(view) = g.titan.as_ref().filter(|_| giant) {
+                // The giant: its health in thousands (bottom left, `Giant::own`), its moves for abilities; no gun, no
+                // rounds, no stim, nothing to pick up.
+                show.health = None;
+                show.abilities = titan_moves(view, g.elapsed);
+                show.prompts.clear();
+            } else if g.kung_fu() {
                 // Hands and feet: no gun, no rounds, no stim (the stim's key dodges).
                 show.fight = fight(g, me, cx);
                 show.abilities.retain(|a| a.icon != Icon::Stim);
@@ -284,6 +351,7 @@ impl Show {
             }
         }
         show.top = top(g, me, cx);
+        show.titan = g.titan.as_ref().map(|view| titan(g, view, me.filter(|_| first), giant));
         show.moment = cx.moment.clone().or_else(|| lasting(g, me, cx));
         if !alive && !g.demo {
             show.watching = cx.watching.and_then(|id| g.roster.iter().find(|p| p.id == id)).map(|p| (p.name.clone(), tint(p)));
@@ -334,6 +402,117 @@ fn fight(g: &Game, me: &Player, cx: &Context) -> Option<Fight> {
         iron: iron(f),
         combo: f.combo,
     })
+}
+
+/// Titan: the giant's moves as abilities, for its own player: lit while it makes one, dim with its seconds while it cools
+/// down (the swat and the low swat, the stomp and the kick, share theirs).
+pub fn titan_moves(view: &kitchen_sim::titan::View, elapsed: f32) -> Vec<Ability> {
+    use kitchen_sim::titan::{READY_CHARGE, READY_JUMP, READY_SMASH, READY_STOMP, READY_SWAT};
+    let now = view.mv().ready_slot();
+    [(Icon::Charge, READY_CHARGE), (Icon::Smash, READY_SMASH), (Icon::Swat, READY_SWAT), (Icon::Stomp, READY_STOMP), (Icon::Leap, READY_JUMP)]
+        .into_iter()
+        .map(|(icon, slot)| {
+            let charge = if now == Some(slot) {
+                Charge::Active(None)
+            } else if view.ready[slot] > elapsed + 0.05 {
+                Charge::Cooling(view.ready[slot] - elapsed)
+            } else {
+                Charge::Ready
+            };
+            Ability { icon, charge, tint: if slot == READY_CHARGE { AMBER } else { WHITE } }
+        })
+        .collect()
+}
+/// The titan's move's icon.
+pub fn move_icon(mv: kitchen_sim::titan::Move) -> Option<Icon> {
+    use kitchen_sim::titan::Move;
+    Some(match mv {
+        Move::Charge => Icon::Charge,
+        Move::Smash => Icon::Smash,
+        Move::SwatHigh | Move::SwatLow => Icon::Swat,
+        Move::Stomp | Move::Kick => Icon::Stomp,
+        Move::Jump => Icon::Leap,
+        _ => return None,
+    })
+}
+/// Titan: what this player sees of the giant (`me`, when this player is alive and playing: the tell and the weak spot
+/// are for it), and whether it is the giant.
+fn titan(g: &Game, view: &kitchen_sim::titan::View, me: Option<&Player>, giant: bool) -> Giant {
+    use kitchen_sim::titan::Move;
+    let body = g.roster.iter().find(|p| p.id == view.titan);
+    let kneeling = matches!(view.mv(), Move::Stagger | Move::Stumble);
+    let mut out = Giant { reserve: view.reserve, pool: view.pool, ..default() };
+    if giant {
+        out.own = Some((view.hp.max(0.), view.max.max(1.), view.stagger.clamp(0., 1.)));
+        return out;
+    }
+    let name = match body {
+        Some(p) if !p.bot => p.name.to_uppercase(),
+        _ => kitchen_sim::titan::NAME.into(),
+    };
+    out.boss = Some(Boss { name, hp: view.hp.max(0.), max: view.max.max(1.), stagger: view.stagger.clamp(0., 1.), kneeling, exposed: view.exposed });
+    if let (Some(me), Some(body)) = (me, body.filter(|p| p.alive)) {
+        out.tell = tell(g, view, body, me);
+        out.weak = weak(g, view, body, me);
+    }
+    out
+}
+/// The warning of the titan's move (`body`, as `view` has it) for `me`: while it winds up and strikes.
+pub fn tell(g: &Game, view: &kitchen_sim::titan::View, body: &Player, me: &Player) -> Option<Tell> {
+    use kitchen_sim::titan::{CHARGE_SPEED, CHARGE_TIME, Move, RADIUS};
+    let mv = view.mv();
+    let icon = move_icon(mv)?;
+    let data = mv.data();
+    let t = view.t(g.elapsed);
+    let strikes_until = if view.len > 0. { view.len - data.recovery } else { data.startup + data.active };
+    if t >= strikes_until {
+        return None;
+    }
+    let (at, mine) = (Vec3::from_array(body.p), Vec3::from_array(me.p));
+    let facing = Vec2::new(-body.yaw.sin(), -body.yaw.cos());
+    let d = Vec2::new(mine.x - at.x, mine.z - at.z);
+    let along = d.dot(facing);
+    let across = (d - facing * along).length();
+    let reach = |centre: Vec2, r: f32| (d - centre).length() < r + feast::HOTDOG_RADIUS as f32;
+    // Whether this player's body is in the sweep's band of heights (above the titan's feet).
+    let banded = || {
+        let h = mine.y - at.y;
+        h < data.band[1] && h + kitchen_sim::actor::HEIGHT as f32 > data.band[0]
+    };
+    let within_arc = || d.length() < 1e-4 || facing.angle_to(d).abs() <= data.arc;
+    let threat = match mv {
+        Move::Charge => along > 0. && along < CHARGE_SPEED * CHARGE_TIME + 0.5 && across < RADIUS + 0.25,
+        Move::Smash | Move::Jump => reach(facing * data.ahead, data.reach),
+        Move::Stomp => reach(facing * data.ahead, data.reach + 0.05),
+        _ => reach(Vec2::ZERO, data.reach) && within_arc() && banded(),
+    };
+    let (bearing, _) = bearing(g.position, g.yaw, at);
+    Some(Tell { icon, bearing, threat, left: data.startup - t, of: data.startup.max(0.01) })
+}
+/// The weak spot of the titan `body`, if it is open (`view.exposed`) and its nape faces `me`: which way it is from the
+/// crosshair, and whether the crosshair is on it.
+/// The titan `body`'s body as this client has it now: offline the round's own (its blends and all) while `body` is the
+/// round's titan where it stands, else the figure of its move (or its stride) that `view` tells, at this client's clock.
+pub fn titan_shape(g: &Game, view: &kitchen_sim::titan::View, body: &Player) -> kitchen_sim::titan::Shape {
+    let own = if g.network { None } else { g.feast.titan_shape() };
+    let here = g.feast.player(body.id).is_some_and(|p| p.p == body.p && p.yaw == body.yaw && p.pitch == body.pitch);
+    own.filter(|_| here).unwrap_or_else(|| kitchen_sim::titan::shape_of(body, view, g.elapsed))
+}
+pub fn weak(g: &Game, view: &kitchen_sim::titan::View, body: &Player, me: &Player) -> Option<Weak> {
+    if !view.exposed {
+        return None;
+    }
+    let shape = titan_shape(g, view, body);
+    let point = shape.weak_point();
+    let eye = Vec3::from_array(me.p) + Vec3::Y * 0.12;
+    if shape.nape.dot((eye - point).normalize_or_zero()) < 0.2 {
+        return None;
+    }
+    let (across, _) = bearing(eye, g.yaw, point);
+    let flat = Vec2::new(point.x - eye.x, point.z - eye.z).length();
+    let up = (point.y - eye.y).atan2(flat) - g.pitch;
+    let on = across.abs() < 0.07 && up.abs() < 0.07;
+    Some(Weak { angle: across.atan2(up), on })
 }
 
 fn arms(g: &Game, me: &Player, cx: &Context) -> Arms {
@@ -400,6 +579,22 @@ fn top(g: &Game, me: Option<&Player>, cx: &Context) -> Top {
         return top;
     }
     let kills = me.map_or(0, |p| p.kills);
+    // Titan: the clock; for the giant the small hotdogs alive, for a small hotdog its damage to the giant and its weak-spot
+    // hits (the pool's pips and the giant's bar are `Giant`'s).
+    if let Some(view) = &g.titan {
+        if view.ends > 0. {
+            top.chips.push(Chip::new(Icon::Clock, WHITE, clock(view.ends - g.elapsed)));
+        }
+        let giant = view.titan != 0 && me.is_some_and(|p| p.id == view.titan);
+        if giant {
+            let alive = g.roster.iter().filter(|p| p.alive && p.id != view.titan).count();
+            top.chips.push(Chip::new(Icon::Hotdog, WHITE, format!("{alive}")));
+        } else if let Some(mine) = me.and_then(|p| view.small(p.id)) {
+            top.chips.push(Chip::new(Icon::Titan, TITAN_RGB, format!("{}", mine.dealt.round() as i32)));
+            top.chips.push(Chip::new(Icon::Weak, GOLD, format!("{}", mine.weak)));
+        }
+        return top;
+    }
     // Kung Fu: the clock, this player's KOs as pips of the KOs to win, the leader's KOs.
     if let Some(view) = &g.kungfu {
         if view.ends > 0. {
@@ -517,6 +712,32 @@ fn lasting(g: &Game, me: Option<&Player>, cx: &Context) -> Option<Moment> {
             _ => None,
         };
     }
+    // Titan: the round over, as this player's side did; a small hotdog dead for good once the pool is empty.
+    if let Some(view) = &g.titan {
+        let giant = view.titan != 0 && me.is_some_and(|p| p.id == view.titan);
+        let won = match view.over {
+            kitchen_sim::titan::OVER_TITAN => Some(giant),
+            kitchen_sim::titan::OVER_SMALLS => Some(!giant),
+            _ => None,
+        };
+        if let Some(won) = won {
+            let words = match (view.over, giant || g.demo) {
+                (kitchen_sim::titan::OVER_TITAN, true) if !g.demo => "YOU WIN",
+                (kitchen_sim::titan::OVER_TITAN, _) => "THE TITAN WINS",
+                (_, true) if !g.demo => "FELLED",
+                _ => "TITAN DOWN",
+            };
+            return Some(Moment { words: words.into(), tint: if won && !g.demo { GOLD } else if g.demo { WHITE } else { RED }, under: None });
+        }
+        if let Some(small) = me.filter(|p| !p.alive && !g.demo).and_then(|p| view.small(p.id)) {
+            if small.out {
+                return Some(Moment { words: "OUT".into(), tint: RED, under: None });
+            }
+            if small.respawn > 0. {
+                return Some(Moment { words: "YOU DIED".into(), tint: RED, under: Some((Key::None, Some(Icon::Clock), format!("{:.1}", small.respawn))) });
+            }
+        }
+    }
     if phase == "RoundOver" {
         // (Its key cap shows by touch too, as it always has: the page's New round button is the same.)
         let enter = Context { touch: false, ..cx.clone() }.key(crate::controls::Action::NewRound);
@@ -563,6 +784,8 @@ pub fn kill(victim: &Player, roster: &[Player], forts: bool, colours: &HashMap<u
         // (Kung Fu credits a ring-out to the last to hit the faller.)
         feast::FALL => (them, Some(Icon::Fall)),
         kitchen_sim::kungfu::BLOW => (them, Some(Icon::Strike)),
+        // (The move that killed is the titan's latest hit on the victim: `Hud::hear`.)
+        feast::TITAN => (Some((Icon::Titan, TITAN_RGB)), None),
         _ => (them, None),
     };
     Kill { at: 0., killer: who, killer_id: killer.map(|p| p.id), how, victim: victim.name.clone(), victim_id: victim.id, tint: colour(victim, forts, colours.get(&victim.id).copied()) }
@@ -616,6 +839,15 @@ pub struct Hud {
     glow: Option<Entity>,
     pop: Option<Entity>,
     fade: Option<Entity>,
+    /// Titan: the last of its events taken, and the entities that change every frame: the tell's arrow round the
+    /// crosshair and its bar running out, the weak spot's arrow and its target (which pulses).
+    told_titan: u32,
+    /// The weak-spot hits of one shooter in a row, as one line of the feed: who, when the last was, and the damage.
+    weak_line: Option<(u32, f32, f32)>,
+    tell_arrow: Option<Entity>,
+    tell_bar: Option<Entity>,
+    weak_arrow: Option<Entity>,
+    weak_mark: Option<Entity>,
 }
 impl Hud {
     /// Shows `words` in the middle for `seconds` from `now`.
@@ -643,6 +875,12 @@ impl Hud {
                     if let Some(them) = g.roster.iter().find(|q| q.id == by) {
                         (line.killer, line.killer_id) = (Some((Icon::Hotdog, colour(them, forts, colours.get(&them.id).copied()))), Some(by));
                     }
+                }
+                // Titan: the giant's kill shows the move that made it (its latest hit on the victim).
+                if p.last_damage.kind == feast::TITAN {
+                    use kitchen_sim::titan::EventKind;
+                    let hit = g.titan.as_ref().and_then(|v| v.events.iter().rev().find(|e| e.to == p.id && matches!(e.kind, Some(EventKind::Hit | EventKind::ChargeHit | EventKind::Stepped))));
+                    line.how = hit.and_then(|e| kitchen_sim::titan::Move::from_u8(e.mv)).and_then(move_icon).or(Some(Icon::Stomp));
                 }
                 self.feed.push(Kill { at: now, ..line });
                 if p.id == g.me() && !g.demo && p.respawn <= 0. {
@@ -686,6 +924,52 @@ impl Hud {
         }
         self.rounds = Some(now_rounds);
         self.fight(g, now);
+        self.titan(g, now, colours);
+    }
+    /// Titan: what happened since the last frame: a weak-spot hit goes in the feed (the shooter, the weak spot, the damage),
+    /// and the giant brought to its knees is a moment (gold for the small hotdogs, red for the giant).
+    fn titan(&mut self, g: &Game, now: f32, colours: &HashMap<u32, [f32; 3]>) {
+        use kitchen_sim::titan::EventKind;
+        let Some(view) = &g.titan else {
+            self.told_titan = 0;
+            return;
+        };
+        let newest = view.events.iter().map(|e| e.id).max().unwrap_or(0);
+        // (The ids start again from 1 each round.)
+        if newest < self.told_titan {
+            self.told_titan = 0;
+        }
+        let giant = view.titan != 0 && view.titan == g.me();
+        let told = self.told_titan;
+        for e in view.events.iter().filter(|e| e.id > told) {
+            match e.kind {
+                Some(EventKind::WeakHit) => {
+                    // (A burst's rounds, and hits in a row from one shooter within WEAK_RUN seconds, add up on one line.)
+                    let last = self.feed.last_mut().filter(|k| k.how == Some(Icon::Weak) && k.killer_id == Some(e.by));
+                    if let (Some(line), Some((_, at, total))) = (last, self.weak_line.as_mut().filter(|(by, at, _)| *by == e.by && now - *at < WEAK_RUN)) {
+                        *total += e.amount;
+                        (*at, line.at, line.victim) = (now, now, format!("-{}", total.round() as i32));
+                        continue;
+                    }
+                    let shooter = g.roster.iter().find(|p| p.id == e.by);
+                    let killer = shooter.map(|p| (Icon::Hotdog, colour(p, false, colours.get(&p.id).copied())));
+                    self.feed.push(Kill { at: now, killer, killer_id: shooter.map(|p| p.id), how: Some(Icon::Weak), victim: format!("-{}", e.amount.round() as i32), victim_id: view.titan, tint: GOLD });
+                    self.weak_line = Some((e.by, now, e.amount));
+                }
+                Some(EventKind::StaggerStart) if e.mv == kitchen_sim::titan::Move::Stagger as u8 && !g.demo => {
+                    if giant {
+                        self.say("STAGGERED", RED, now, 1.5);
+                    } else {
+                        self.say("ON ITS KNEES", GOLD, now, 1.5);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.told_titan = self.told_titan.max(newest);
+        while self.feed.len() > FEED_MAX {
+            self.feed.remove(0);
+        }
     }
     /// Kung Fu: what happened to this player since the last frame (the events not yet taken: a blow blocked, a parry, a
     /// guard broken, by it or to it), a new style (its name for a moment) and a longer combo (its count pops).
@@ -751,6 +1035,9 @@ enum Region {
     /// Kung Fu: the combo's count, right of the crosshair, and the feedback over it.
     Combo,
     Feel,
+    /// Titan: a move's tell round the crosshair, and the weak spot's cue.
+    Tell,
+    Weak,
 }
 /// The display's root: everything else hangs from it.
 #[derive(Component)]
@@ -880,11 +1167,15 @@ fn frame(world: &mut World, hud: &mut Hud, z: Size) -> Entity {
             Region::Feel => {
                 (node.left, node.right, node.top, node.margin, node.justify_content) = (Val::Px(0.), Val::Px(0.), Val::Percent(50.), UiRect::top(z.px(-62.)), JustifyContent::Center);
             }
+            // (Both hang from the crosshair: a node of no size there, what they show placed round it.)
+            Region::Tell | Region::Weak => {
+                (node.left, node.top, node.width, node.height) = (Val::Percent(50.), Val::Percent(50.), Val::Px(0.), Val::Px(0.));
+            }
         }
         node
     };
     hud.regions.clear();
-    for region in [Region::Vitals, Region::Arms, Region::Top, Region::Objective, Region::Feed, Region::Prompt, Region::Moment, Region::Watch, Region::Combo, Region::Feel] {
+    for region in [Region::Vitals, Region::Arms, Region::Top, Region::Objective, Region::Feed, Region::Prompt, Region::Moment, Region::Watch, Region::Combo, Region::Feel, Region::Tell, Region::Weak] {
         let e = world.spawn((Area, place(region), Visibility::Inherited)).id();
         world.entity_mut(root).add_child(e);
         hud.regions.insert(region, e);
@@ -900,10 +1191,17 @@ fn fill(world: &mut World, hud: &mut Hud, show: &Show, z: Size, now: f32) {
     let fight = show.fight.as_ref().map(|f| (f.style, f.chi as i32, f.full, f.key, (f.guard as i32).min(100), f.iron));
     let combo = show.fight.as_ref().map_or(0, |f| f.combo);
     let feel = hud.feel.filter(|(.., at)| now - at < FEEL_TIME);
-    let parts: [(Region, String); 10] = [
-        (Region::Vitals, format!("{:?}{:?}{:?}", show.health.map(|h| h.ceil() as i32), show.abilities.iter().map(|a| (a.icon, charge_label(a.charge))).collect::<Vec<_>>(), fight.map(|f| f.4))),
+    // (Titan's numbers as they show: whole points of health, the stagger in hundredths.)
+    let giant = show.titan.as_ref();
+    let boss = giant.and_then(|t| t.boss.as_ref()).map(|b| (&b.name, b.hp.ceil() as i32, b.max as i32, (b.stagger * 100.) as i32, b.kneeling, b.exposed));
+    let own = giant.and_then(|t| t.own).map(|(hp, max, stagger)| (hp.ceil() as i32, max as i32, (stagger * 100.) as i32));
+    let pool = giant.map(|t| (t.reserve, t.pool));
+    let tell = giant.and_then(|t| t.tell).map(|t| (t.icon, t.threat));
+    let weak = giant.and_then(|t| t.weak).map(|w| w.on);
+    let parts: [(Region, String); 12] = [
+        (Region::Vitals, format!("{:?}{:?}{:?}{own:?}", show.health.map(|h| h.ceil() as i32), show.abilities.iter().map(|a| (a.icon, charge_label(a.charge))).collect::<Vec<_>>(), fight.map(|f| f.4))),
         (Region::Arms, format!("{:?}{flash}{refused}{fight:?}", show.arms)),
-        (Region::Top, format!("{:?}{:?}{:?}", show.top.teams, show.top.chips, show.top.kos)),
+        (Region::Top, format!("{:?}{:?}{:?}{boss:?}{pool:?}", show.top.teams, show.top.chips, show.top.kos)),
         (Region::Objective, format!("{:?}", show.top.objective.map(|o| (o.icon, (o.distance * 10.).round() as i32)))),
         (Region::Feed, format!("{:?}", hud.feed.iter().map(|k| (k.at.to_bits(), &k.victim)).collect::<Vec<_>>())),
         (Region::Prompt, format!("{:?}", show.prompts)),
@@ -911,6 +1209,8 @@ fn fill(world: &mut World, hud: &mut Hud, show: &Show, z: Size, now: f32) {
         (Region::Watch, format!("{:?}", show.watching)),
         (Region::Combo, format!("{combo}")),
         (Region::Feel, format!("{:?}", feel.map(|(icon, tint, at)| (icon, tint, at.to_bits())))),
+        (Region::Tell, format!("{tell:?}")),
+        (Region::Weak, format!("{weak:?}")),
     ];
     for (region, key) in parts {
         if hud.shown.get(&region) == Some(&key) {
@@ -927,6 +1227,8 @@ fn fill(world: &mut World, hud: &mut Hud, show: &Show, z: Size, now: f32) {
             Region::Arms => hud.glow = None,
             Region::Combo => hud.pop = None,
             Region::Feel => hud.fade = None,
+            Region::Tell => (hud.tell_arrow, hud.tell_bar) = (None, None),
+            Region::Weak => (hud.weak_arrow, hud.weak_mark) = (None, None),
             _ => {}
         }
         let mut ui = Ui { world, z, kids: vec![] };
@@ -948,6 +1250,8 @@ fn fill(world: &mut World, hud: &mut Hud, show: &Show, z: Size, now: f32) {
             Region::Prompt => prompt_ui(&mut ui, &show.prompts),
             Region::Moment => moment_ui(&mut ui, show.moment.as_ref()),
             Region::Watch => watch_ui(&mut ui, show.watching.as_ref()),
+            Region::Tell => (hud.tell_arrow, hud.tell_bar) = giant.and_then(|t| t.tell).map_or((None, None), |t| tell_ui(&mut ui, t)),
+            Region::Weak => (hud.weak_arrow, hud.weak_mark) = giant.and_then(|t| t.weak).map_or((None, None), |w| weak_ui(&mut ui, w)),
         }
         let kids = std::mem::take(&mut ui.kids);
         world.entity_mut(area).add_children(&kids);
@@ -973,6 +1277,24 @@ fn fill(world: &mut World, hud: &mut Hud, show: &Show, z: Size, now: f32) {
     if let (Some(fade), Some((_, tint, at))) = (hud.fade, feel) {
         if let Some(mut image) = world.get_mut::<ImageNode>(fade) {
             image.color = rgba(tint, feel_alpha(now - at));
+        }
+    }
+    // Titan: the tell's arrow follows the giant round the crosshair and its bar runs out to the blow; the weak spot's arrow
+    // turns to it and its target pulses.
+    if let Some(t) = giant.and_then(|t| t.tell) {
+        if let Some(mut tr) = hud.tell_arrow.and_then(|e| world.get_mut::<UiTransform>(e)) {
+            tr.rotation = Rot2::radians(t.bearing);
+        }
+        if let Some(mut node) = hud.tell_bar.and_then(|e| world.get_mut::<Node>(e)) {
+            node.width = Val::Percent(100. * (t.left / t.of).clamp(0., 1.));
+        }
+    }
+    if let Some(w) = giant.and_then(|t| t.weak) {
+        if let Some(mut tr) = hud.weak_arrow.and_then(|e| world.get_mut::<UiTransform>(e)) {
+            tr.rotation = Rot2::radians(w.angle);
+        }
+        if let Some(mut image) = hud.weak_mark.and_then(|e| world.get_mut::<ImageNode>(e)) {
+            image.color = rgba(GOLD, 0.6 + 0.4 * glow_level(now * if w.on { 2. } else { 1. }));
         }
     }
 }
@@ -1094,6 +1416,36 @@ fn vitals(ui: &mut Ui, show: &Show) {
         let number = ui.text(&format!("{}", hp.ceil().max(1.) as i32), 24., rgb(lighten(colour, 0.35)));
         let row = ui.row(8., &[heart, bar, number]);
         ui.top_level(row);
+    }
+    // Titan, its own player: its health of its full health (thousands), the stagger its legs have taken under it.
+    if let Some((hp, max, stagger)) = show.titan.as_ref().and_then(|t| t.own) {
+        let head = ui.icon(Icon::Titan, 26., rgb(TITAN_RGB));
+        let share = (hp / max * 100.).clamp(0., 100.);
+        let colour = crate::tags::health_rgb(share);
+        let fill = ui.world.spawn((Node { width: Val::Percent(share), height: Val::Percent(100.), border_radius: BorderRadius::all(z.px(3.)), ..default() }, BackgroundColor(rgb(colour)))).id();
+        let bar = ui
+            .world
+            .spawn((
+                Node { width: z.px(190.), height: z.px(12.), border: UiRect::all(z.px(1.)), border_radius: BorderRadius::all(z.px(4.)), ..default() },
+                BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.7)),
+                BorderColor::all(Color::srgba(0.02, 0.02, 0.03, 0.9)),
+            ))
+            .add_child(fill)
+            .id();
+        let number = ui.text(&format!("{}", hp.ceil().max(1.) as i32), 24., rgb(lighten(colour, 0.35)));
+        let row = ui.row(8., &[head, bar, number]);
+        ui.top_level(row);
+        if stagger > 0.005 {
+            let legs = ui.icon(Icon::Kneel, 16., rgb(STAGGER));
+            let fill = ui.world.spawn((Node { width: Val::Percent(stagger * 100.), height: Val::Percent(100.), border_radius: BorderRadius::all(z.px(2.)), ..default() }, BackgroundColor(rgb(STAGGER)))).id();
+            let bar = ui
+                .world
+                .spawn((Node { width: z.px(190.), height: z.px(5.), border_radius: BorderRadius::all(z.px(3.)), margin: UiRect::left(z.px(6.)), ..default() }, BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.6))))
+                .add_child(fill)
+                .id();
+            let row = ui.row(8., &[legs, bar]);
+            ui.top_level(row);
+        }
     }
     // Kung Fu: the guard, a thin bar under the health's, while it is down (blocks wear it, it comes back by itself).
     if let Some(f) = show.fight.as_ref().filter(|f| f.guard < kitchen_sim::kungfu::GUARD_MAX - 0.5) {
@@ -1264,6 +1616,25 @@ fn top_ui(ui: &mut Ui, show: &Show) {
         ui.world.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: z.px(4.), ..default() }).add_children(&[row, mark]).id()
     };
     let mut chips = vec![];
+    // Titan: the pool's reinforcements left, as pips (a pip a comeback), before the other chips.
+    if let Some(t) = show.titan.as_ref().filter(|t| t.pool > 0) {
+        let mut dots = vec![];
+        for k in 0..t.pool {
+            let on = k < t.reserve;
+            dots.push(
+                ui.world
+                    .spawn((
+                        Node { width: z.px(9.), height: z.px(9.), border: UiRect::all(z.px(1.5)), border_radius: BorderRadius::MAX, ..default() },
+                        BackgroundColor(if on { rgb(WHITE) } else { Color::srgba(0.02, 0.02, 0.03, 0.45) }),
+                        BorderColor::all(if on { Color::srgba(0.02, 0.02, 0.03, 0.9) } else { rgba(DIM, 0.8) }),
+                    ))
+                    .id(),
+            );
+        }
+        let pips = ui.row(3., &dots);
+        let who = ui.icon(Icon::Hotdog, 20., rgb(if t.reserve > 0 { WHITE } else { RED }));
+        chips.push(ui.row(5., &[who, pips]));
+    }
     for chip in &show.top.chips {
         let mut kids = vec![];
         if let Some(k) = chip.key {
@@ -1284,7 +1655,15 @@ fn top_ui(ui: &mut Ui, show: &Show) {
         }
         None => middle,
     };
-    if show.top.teams.is_none() && show.top.chips.is_empty() {
+    // Titan: the giant's bar over the chips.
+    let content = match show.titan.as_ref().and_then(|t| t.boss.as_ref()) {
+        Some(boss) => {
+            let bar = boss_ui(ui, boss);
+            ui.world.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: z.px(6.), ..default() }).add_children(&[bar, content]).id()
+        }
+        None => content,
+    };
+    if show.top.teams.is_none() && show.top.chips.is_empty() && show.titan.is_none() {
         return;
     }
     let plate = ui
@@ -1296,6 +1675,102 @@ fn top_ui(ui: &mut Ui, show: &Show) {
         .add_child(content)
         .id();
     ui.top_level(plate);
+}
+
+/// Titan: the giant's health bar across the top: its icon and name over the bar's left end and its health over the right,
+/// the bar (gold edged, the kneeling mark at its end, while it is on its knees), and the stagger meter under it.
+fn boss_ui(ui: &mut Ui, boss: &Boss) -> Entity {
+    let z = ui.z;
+    let head = ui.icon(Icon::Titan, 20., rgb(TITAN_RGB));
+    let name = ui.text(&boss.name, 15., rgb(WHITE));
+    let mut left = vec![head, name];
+    if boss.exposed {
+        left.push(ui.icon(Icon::Weak, 18., rgb(GOLD)));
+    }
+    let left = ui.row(6., &left);
+    let number = ui.text(&format!("{}", boss.hp.ceil().max(0.) as i32), 15., rgb(lighten(TITAN_RGB, 0.4)));
+    let label = ui.world.spawn(Node { width: Val::Percent(100.), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).add_children(&[left, number]).id();
+    let share = (boss.hp / boss.max * 100.).clamp(0., 100.);
+    let fill = ui.world.spawn((Node { width: Val::Percent(share), height: Val::Percent(100.), border_radius: BorderRadius::all(z.px(3.)), ..default() }, BackgroundColor(rgb(TITAN_RGB)))).id();
+    // A notch every tenth of its health, so that a chunk taken off reads at a glance whatever the round's size.
+    let notches: Vec<Entity> = boss_notches()
+        .into_iter()
+        .map(|at| ui.world.spawn((Node { position_type: PositionType::Absolute, left: Val::Percent(at * 100.), top: Val::Px(0.), width: z.px(1.5), height: Val::Percent(100.), ..default() }, BackgroundColor(Color::srgba(0.02, 0.02, 0.03, 0.55)))).id())
+        .collect();
+    let bar = ui
+        .world
+        .spawn((
+            Node { width: Val::Percent(100.), height: z.px(13.), border: UiRect::all(z.px(if boss.kneeling { 2. } else { 1. })), border_radius: BorderRadius::all(z.px(4.)), ..default() },
+            BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.75)),
+            BorderColor::all(if boss.kneeling { rgb(GOLD) } else { Color::srgba(0.02, 0.02, 0.03, 0.9) }),
+        ))
+        .add_child(fill)
+        .add_children(&notches)
+        .id();
+    let mut bar_row = vec![bar];
+    if boss.kneeling {
+        let mark = ui.icon(Icon::Kneel, 20., rgb(GOLD));
+        ui.world.entity_mut(mark).entry::<Node>().and_modify(|mut n| {
+            (n.position_type, n.right, n.top) = (PositionType::Absolute, z.px(-26.), z.px(-4.));
+        });
+        bar_row.push(mark);
+    }
+    let bar_box = ui.world.spawn(Node { width: Val::Percent(100.), ..default() }).add_children(&bar_row).id();
+    let stagger_fill = ui.world.spawn((Node { width: Val::Percent(boss.stagger * 100.), height: Val::Percent(100.), border_radius: BorderRadius::all(z.px(2.)), ..default() }, BackgroundColor(rgb(STAGGER)))).id();
+    let stagger = ui.world.spawn((Node { width: Val::Percent(100.), height: z.px(4.), border_radius: BorderRadius::all(z.px(2.)), ..default() }, BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.6)))).add_child(stagger_fill).id();
+    ui.world.spawn(Node { width: z.px(440.), flex_direction: FlexDirection::Column, row_gap: z.px(3.), ..default() }).add_children(&[label, bar_box, stagger]).id()
+}
+/// Titan: where the boss bar's notches stand, as shares of its length: every tenth. (One every small hotdog's share,
+/// `titan::HP_PER`, was tried: with the giant's own health on top that is up to ten uneven segments, the last cut short.)
+pub fn boss_notches() -> Vec<f32> {
+    (1..10).map(|k| k as f32 / 10.).collect()
+}
+/// Titan: a move's tell round the crosshair: the move's icon over it (red when it is coming at this player) with a bar
+/// under the icon running out to the blow, and an arrow on a ring round the crosshair pointing at the giant. Returns the
+/// arrow's ring (it turns every frame) and the bar's fill.
+fn tell_ui(ui: &mut Ui, t: Tell) -> (Option<Entity>, Option<Entity>) {
+    let z = ui.z;
+    let tint = if t.threat { RED } else { AMBER };
+    let icon = ui.icon(t.icon, if t.threat { 34. } else { 28. }, rgb(tint));
+    let fill = ui.world.spawn((Node { width: Val::Percent(100.), height: Val::Percent(100.), ..default() }, BackgroundColor(rgb(tint)))).id();
+    let bar = ui.world.spawn((Node { width: z.px(44.), height: z.px(4.), ..default() }, BackgroundColor(rgba(DIM, 0.35)))).add_child(fill).id();
+    let mark = ui
+        .world
+        .spawn(Node { position_type: PositionType::Absolute, left: z.px(-40.), width: z.px(80.), bottom: z.px(48.), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: z.px(3.), ..default() })
+        .add_children(&[icon, bar])
+        .id();
+    ui.top_level(mark);
+    let arrow = ui.icon(Icon::Arrow, 18., rgb(tint));
+    let ring = ui
+        .world
+        .spawn((
+            Node { position_type: PositionType::Absolute, left: z.px(-44.), top: z.px(-44.), width: z.px(88.), height: z.px(88.), justify_content: JustifyContent::Center, align_items: AlignItems::FlexStart, ..default() },
+            UiTransform::from_rotation(Rot2::radians(t.bearing)),
+        ))
+        .add_child(arrow)
+        .id();
+    ui.top_level(ring);
+    (Some(ring), Some(fill))
+}
+/// Titan: the weak spot open to this player: a gold target up and right of the crosshair (it pulses, faster with the
+/// crosshair on it) and an arrow on a ring round the crosshair pointing to it. Returns the ring and the target.
+fn weak_ui(ui: &mut Ui, w: Weak) -> (Option<Entity>, Option<Entity>) {
+    let z = ui.z;
+    let target = ui.icon(Icon::Weak, if w.on { 30. } else { 24. }, rgb(GOLD));
+    let holder = ui.world.spawn(Node { position_type: PositionType::Absolute, left: z.px(22.), bottom: z.px(18.), ..default() }).add_child(target).id();
+    ui.top_level(holder);
+    let arrow = ui.icon(Icon::Arrow, 14., rgb(GOLD));
+    let ring = ui
+        .world
+        .spawn((
+            Node { position_type: PositionType::Absolute, left: z.px(-30.), top: z.px(-30.), width: z.px(60.), height: z.px(60.), justify_content: JustifyContent::Center, align_items: AlignItems::FlexStart, ..default() },
+            UiTransform::from_rotation(Rot2::radians(w.angle)),
+            if w.on { Visibility::Hidden } else { Visibility::Inherited },
+        ))
+        .add_child(arrow)
+        .id();
+    ui.top_level(ring);
+    (Some(ring), Some(target))
 }
 
 /// The objective: its icon, an arrow turned towards it (returned, to turn every frame), and how far.
@@ -1740,5 +2215,226 @@ mod tests {
         // The combo's count is a number.
         let texts: Vec<String> = world.query::<&Text>().iter(world).map(|t| t.0.clone()).collect();
         assert!(texts.contains(&"5".to_string()), "{texts:?}");
+    }
+
+    // ----- Titan.
+    /// A round of Titan offline on its own map, `pick` saying who the titan is (`me`: this player, `bot`: a bot).
+    fn titan_game(pick: &str) -> App {
+        let mut app = game(&format!("mode=titan&titan={pick}"));
+        let map = kitchen_sim::map::Map::parse(include_str!("../assets/maps/titans-kitchen.json")).unwrap();
+        crate::arena::load_map(app.world_mut(), map);
+        crate::arena::test_frame(&mut app, 0.05);
+        app
+    }
+    fn icons_made(app: &mut App) -> Vec<Icon> {
+        app.init_resource::<Icons>().init_resource::<Hud>();
+        app.world_mut().run_system_once(update).unwrap();
+        let world = app.world_mut();
+        let handles: Vec<Handle<Image>> = world.query::<&ImageNode>().iter(world).map(|i| i.image.clone()).collect();
+        let icons = world.resource::<Icons>();
+        handles.iter().filter_map(|h| icons.which(h)).collect()
+    }
+
+    #[test]
+    fn a_small_hotdog_sees_the_giants_bar_the_pool_the_clock_and_its_damage_and_none_of_the_giants_own() {
+        let mut app = titan_game("bot");
+        let g = app.world().resource::<Game>();
+        let view = g.titan.clone().expect("a round of Titan");
+        assert!(view.titan != 0 && view.titan != g.me(), "a bot is the titan");
+        let show = Show::of(g, &Context::default());
+        let giant = show.titan.clone().unwrap();
+        let boss = giant.boss.clone().unwrap();
+        assert_eq!((boss.name.as_str(), boss.hp, boss.max, boss.kneeling), (kitchen_sim::titan::NAME, view.max, view.max, false));
+        assert!(giant.own.is_none(), "the giant's own health is its player's alone");
+        assert_eq!((giant.reserve, giant.pool), (view.pool, view.pool));
+        assert!(giant.pool >= kitchen_sim::titan::PER_SMALL * 2);
+        // The gun basics, as in every gun mode: health, the stim, the gun and its rounds.
+        assert_eq!(show.health, Some(100.));
+        assert!(show.arms.is_some() && show.abilities.iter().any(|a| a.icon == Icon::Stim));
+        assert!(!show.abilities.iter().any(|a| matches!(a.icon, Icon::Charge | Icon::Smash | Icon::Swat | Icon::Stomp | Icon::Leap)));
+        // The top: the clock, this player's damage to the giant and its weak-spot hits; numbers only.
+        assert_eq!(show.top.chips.iter().map(|c| c.icon).collect::<Vec<_>>(), [Icon::Clock, Icon::Titan, Icon::Weak]);
+        assert_eq!((show.top.chips[1].text.as_str(), show.top.chips[2].text.as_str()), ("0", "0"));
+        for w in words(&show) {
+            assert!(w.chars().all(|c| c.is_ascii_digit() || ":/.m".contains(c)), "{w:?}");
+        }
+        // Nothing winds up yet, and its back is not open: no tell, no weak spot.
+        assert_eq!((giant.tell, giant.weak), (None, None));
+        let made = icons_made(&mut app);
+        assert!(made.contains(&Icon::Titan) && made.contains(&Icon::Clock) && made.contains(&Icon::Bullet), "{made:?}");
+        assert!(!made.iter().any(|i| matches!(i, Icon::Charge | Icon::Smash | Icon::Leap)), "{made:?}");
+    }
+
+    #[test]
+    fn the_giant_sees_its_health_its_moves_cooldowns_and_the_small_hotdogs_left_and_no_gun() {
+        let mut app = titan_game("me");
+        let g = app.world().resource::<Game>();
+        let view = g.titan.clone().unwrap();
+        assert_eq!(view.titan, g.me(), "this player is the titan");
+        let show = Show::of(g, &Context::default());
+        let giant = show.titan.clone().unwrap();
+        assert!(giant.boss.is_none(), "no bar across the top for its own health");
+        assert_eq!(giant.own, Some((view.max, view.max, 0.)));
+        assert_eq!((show.health, show.arms.clone()), (None, None), "no hotdog's health, no gun");
+        assert!(show.prompts.is_empty());
+        assert_eq!(show.abilities.iter().map(|a| a.icon).collect::<Vec<_>>(), [Icon::Charge, Icon::Smash, Icon::Swat, Icon::Stomp, Icon::Leap]);
+        assert!(show.abilities.iter().all(|a| a.charge == Charge::Ready));
+        let smalls = g.roster.iter().filter(|p| p.alive && p.id != view.titan).count();
+        assert_eq!(show.top.chips.iter().map(|c| (c.icon, c.text.clone())).skip(1).collect::<Vec<_>>(), [(Icon::Hotdog, format!("{smalls}"))]);
+        assert_eq!((giant.tell, giant.weak), (None, None));
+        // A move cooling down shows its seconds, dim; the one it makes is lit.
+        let mut cooling = view.clone();
+        cooling.ready[kitchen_sim::titan::READY_SMASH] = g.elapsed + 3.2;
+        cooling.mv = kitchen_sim::titan::Move::Charge as u8;
+        let moves = titan_moves(&cooling, g.elapsed);
+        assert_eq!((moves[0].charge, moves[1].charge, moves[2].charge), (Charge::Active(None), Charge::Cooling(3.2), Charge::Ready));
+        let made = icons_made(&mut app);
+        assert!(made.contains(&Icon::Charge) && made.contains(&Icon::Smash) && made.contains(&Icon::Leap) && made.contains(&Icon::Titan), "{made:?}");
+        assert!(!made.iter().any(|i| matches!(i, Icon::Gun(_) | Icon::Bullet | Icon::Stim | Icon::Heart)), "{made:?}");
+    }
+
+    #[test]
+    fn a_tell_warns_red_of_a_move_coming_at_this_player_amber_of_one_that_is_not_and_points_at_the_giant() {
+        use kitchen_sim::titan::Move;
+        let app = titan_game("bot");
+        let g = app.world().resource::<Game>();
+        let mut view = g.titan.clone().unwrap();
+        let me = g.roster.iter().find(|p| p.id == g.me()).unwrap().clone();
+        let mut body = g.roster.iter().find(|p| p.id == view.titan).unwrap().clone();
+        // The giant two metres in front of this player (along its look), facing it.
+        let ahead = Vec3::new(-g.yaw.sin(), 0., -g.yaw.cos());
+        let mine = Vec3::from_array(me.p);
+        body.p = (mine + ahead * 1.).to_array();
+        body.yaw = g.yaw + std::f32::consts::PI;
+        (view.mv, view.started, view.len) = (Move::Smash as u8, g.elapsed - 0.2, Move::Smash.data().total());
+        let t = tell(g, &view, &body, &me).expect("a smash winding up");
+        assert_eq!((t.icon, t.threat), (Icon::Smash, true));
+        assert!(t.bearing.abs() < 0.05, "straight ahead: {}", t.bearing);
+        assert!((t.left - (Move::Smash.data().startup - 0.2)).abs() < 1e-4);
+        // Far off, the same smash is no threat to this player; behind it, the arrow points back.
+        body.p = (mine - ahead * 4.).to_array();
+        let t = tell(g, &view, &body, &me).unwrap();
+        assert!(!t.threat && (t.bearing.abs() - std::f32::consts::PI).abs() < 0.05);
+        // A charge comes at this player down the line it faces, and passes one off to its side.
+        (view.mv, view.len) = (Move::Charge as u8, 3.);
+        body.p = (mine + ahead * 3.).to_array();
+        assert!(tell(g, &view, &body, &me).unwrap().threat);
+        body.yaw += std::f32::consts::FRAC_PI_2;
+        assert!(!tell(g, &view, &body, &me).unwrap().threat);
+        // The high swat passes over a hotdog on the floor; the low one does not.
+        body.yaw = g.yaw + std::f32::consts::PI;
+        body.p = (mine + ahead * 0.8).to_array();
+        (view.mv, view.len) = (Move::SwatHigh as u8, Move::SwatHigh.data().total());
+        assert!(!tell(g, &view, &body, &me).unwrap().threat);
+        (view.mv, view.len) = (Move::SwatLow as u8, Move::SwatLow.data().total());
+        assert!(tell(g, &view, &body, &me).unwrap().threat);
+        // Once the blow is over, and while it walks, nothing is told.
+        view.started = g.elapsed - Move::SwatLow.data().total();
+        assert_eq!(tell(g, &view, &body, &me), None);
+        (view.mv, view.started) = (Move::Walk as u8, g.elapsed);
+        assert_eq!(tell(g, &view, &body, &me), None);
+    }
+
+    /// The ring round the weak spot follows the giant as it moves: offline the round's own body, through its move and
+    /// the blends into it; online the figure of its move at this client's clock.
+    #[test]
+    fn the_weak_spot_ring_follows_the_giant_through_a_move() {
+        use kitchen_sim::titan::{Move, Shape, shape_of};
+        let mut app = titan_game("bot");
+        let titan = app.world().resource::<Game>().titan.as_ref().unwrap().titan;
+        app.world_mut().resource_mut::<Game>().feast.titan_press(Move::Smash);
+        let mut seen = vec![];
+        for _ in 0..30 {
+            crate::arena::test_frame(&mut app, 1. / 30.);
+            let g = app.world().resource::<Game>();
+            let (view, body) = (g.titan.clone().unwrap(), g.feast.player(titan).unwrap().clone());
+            if view.mv() != Move::Smash {
+                continue;
+            }
+            let ring = titan_shape(g, &view, &body).weak_point();
+            assert!(ring.distance(g.feast.titan_shape().unwrap().weak_point()) < 1e-5, "offline, the round's own");
+            seen.push((ring, Shape::of(&body, view.mv()).weak_point()));
+            // Online the same view tells the move's figure at this client's clock.
+            let online = shape_of(&body, &view, g.elapsed).weak_point();
+            assert!(online.distance(ring) < 0.06, "online {online} against {ring}");
+        }
+        assert!(seen.len() > 10, "{} frames of the smash", seen.len());
+        let moved = seen.iter().map(|(r, _)| r.distance(seen[0].0)).fold(0f32, f32::max);
+        let off_steady = seen.iter().map(|(r, steady)| r.distance(*steady)).fold(0f32, f32::max);
+        assert!(moved > 0.1 && off_steady > 0.1, "the ring moved {moved} m, {off_steady} m off the steady stance's");
+    }
+
+    #[test]
+    fn the_weak_spot_cue_shows_while_the_back_of_its_head_is_open_to_this_player_only() {
+        use kitchen_sim::titan::Move;
+        let app = titan_game("bot");
+        let g = app.world().resource::<Game>();
+        let mut view = g.titan.clone().unwrap();
+        let me = g.roster.iter().find(|p| p.id == g.me()).unwrap().clone();
+        let mut body = g.roster.iter().find(|p| p.id == view.titan).unwrap().clone();
+        let ahead = Vec3::new(-g.yaw.sin(), 0., -g.yaw.cos());
+        // On its knees two metres ahead, its back to this player.
+        body.p = (Vec3::from_array(me.p) + ahead * 2.).to_array();
+        body.yaw = g.yaw;
+        (view.mv, view.started, view.exposed) = (Move::Stagger as u8, g.elapsed, true);
+        let w = weak(g, &view, &body, &me).expect("its nape faces this player");
+        assert!(w.angle.is_finite());
+        // Facing this player, its nape is turned away; and while it is not open, nothing at all.
+        body.yaw = g.yaw + std::f32::consts::PI;
+        assert_eq!(weak(g, &view, &body, &me), None);
+        body.yaw = g.yaw;
+        view.exposed = false;
+        assert_eq!(weak(g, &view, &body, &me), None);
+    }
+
+    #[test]
+    fn the_boss_bar_is_notched_every_tenth_of_the_giants_health() {
+        use kitchen_sim::titan::{HP_BASE, HP_PER};
+        let notches = boss_notches();
+        assert_eq!(notches.len(), 9);
+        assert!(notches.windows(2).all(|w| (w[1] - w[0] - 0.1).abs() < 1e-5) && notches.iter().all(|n| *n > 0. && *n < 1.));
+        // Its health fits the bar's number: five digits at the most a round has (eight small hotdogs).
+        assert!(format!("{}", (HP_BASE + HP_PER * kitchen_sim::titan::SMALLS_MAX as f32) as i32).len() <= 5);
+    }
+
+    #[test]
+    fn the_feed_shows_a_weak_spot_hit_with_its_damage_and_the_giants_knees_are_a_moment() {
+        use kitchen_sim::titan::{Event, EventKind, Move};
+        let mut app = titan_game("bot");
+        let mut hud = Hud::default();
+        let (shooter, titan) = {
+            let g = app.world().resource::<Game>();
+            (g.me(), g.titan.as_ref().unwrap().titan)
+        };
+        {
+            let mut g = app.world_mut().resource_mut::<Game>();
+            let view = g.titan.as_mut().unwrap();
+            view.events = vec![
+                Event { id: 1, kind: Some(EventKind::WeakHit), by: shooter, to: titan, amount: 224.6, ..default() },
+                Event { id: 2, kind: Some(EventKind::StaggerStart), by: titan, mv: Move::Stagger as u8, ..default() },
+            ];
+        }
+        let g = app.world().resource::<Game>();
+        hud.hear(g, 10., &HashMap::new());
+        let line = hud.feed.last().unwrap();
+        assert_eq!((line.how, line.victim.as_str(), line.killer_id), (Some(Icon::Weak), "-225", Some(shooter)));
+        assert_eq!(hud.moment(10.).map(|m| m.words), Some("ON ITS KNEES".into()));
+        // Taken once.
+        let count = hud.feed.len();
+        hud.hear(g, 10.1, &HashMap::new());
+        assert_eq!(hud.feed.len(), count);
+        // A second hit by the same shooter a moment later adds up on the same line.
+        {
+            let mut g = app.world_mut().resource_mut::<Game>();
+            g.titan.as_mut().unwrap().events.push(Event { id: 3, kind: Some(EventKind::WeakHit), by: shooter, to: titan, amount: 100., ..default() });
+        }
+        let g = app.world().resource::<Game>();
+        hud.hear(g, 10.6, &HashMap::new());
+        assert_eq!((hud.feed.len(), hud.feed.last().unwrap().victim.as_str()), (count, "-325"));
+        // A titan's kill names the move that made it.
+        let mut victim = g.roster.iter().find(|p| p.id == shooter).unwrap().clone();
+        victim.last_damage.kind = feast::TITAN;
+        victim.last_damage.attacker = titan;
+        assert_eq!(kill(&victim, &g.roster, false, &HashMap::new()).killer.map(|k| k.0), Some(Icon::Titan));
     }
 }

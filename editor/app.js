@@ -44,7 +44,7 @@ const TOOLS=[
 ];
 const toolById=id=>TOOLS.find(tool=>tool.id===id);
 const THEME_NAME={kitchen:'Kitchen by day',night:'Kitchen at night',jungle:'Jungle'};
-const MODE_NAME={siege:'Siege: zombie wave, then free for all',forts:'Forts: two teams and the bacon',kungfu:'Kung Fu: hands and feet, in a ring'};
+const MODE_NAME={siege:'Siege: zombie wave, then free for all',forts:'Forts: two teams and the bacon',kungfu:'Kung Fu: hands and feet, in a ring',titan:'Titan: one giant against all the others'};
 // What a gun's pickup gives, by weapon, in every gun mode whatever the map says (kitchen-sim magazine.rs PICKUP): a magazine, the power weapons fewer.
 const PICKUP=[0,12,4,90,2,40,60,150],POWER=[2,4],POWER_BACK=[30,60];
 // Which tool supplies what a Forts map is reported to lack.
@@ -425,7 +425,7 @@ function mapPanel(){
   // The mode is the game's (the lobby, the page's ?mode=, the server's --mode): what a map is made for is only the mode it plays when nothing else says.
   nodes.push(el('h2',{},'Game'),
     el('div',{class:'fields'},selectField('Made for','mode',map.mode,MODES.map(mode=>[mode,MODE_NAME[mode]??title(mode)]),v=>set({mode:v}))),
-    el('p',{class:'after'},map.mode==='kungfu'?'A Kung Fu map is played as Kung Fu alone.':
+    el('p',{class:'after'},map.mode==='kungfu'?'A Kung Fu map is played as Kung Fu alone.':map.mode==='titan'?'A Titan map can also be played as a siege or Free For All. Its first start is the titan\'s, in the open; the others are the small hotdogs\'. A box with a base is a den: small hotdogs walk under it, the titan cannot.':
       `The mode is chosen in the game; this is the one the map plays when none is. It can be played as a siege or Free For All${forts||laid?', and as Forts':', and as Forts once it has the Forts layout: a base for each team, a forcefield and the bacon'}.`));
   if(forts||laid)nodes.push(el('p',{},'Forts: the Mustard Eaters and the Ketchup Connoisseurs each build on their own side of the forcefield (for the game\'s build time, 150 s unless the server says otherwise), then carry the bacon home. Give every start a team, each team a base, and both sides something loose to build with.'));
   // How long a taken pickup takes to come back, and what it gives: the game's rules, the same on every map. A map that sets its own times (from before)
@@ -439,7 +439,9 @@ function mapPanel(){
     el('div',{class:'fields'},bound('Left edge (x)','b0',0),bound('Top edge (z)','b1',1),bound('Right edge (x)','b2',2),bound('Bottom edge (z)','b3',3)),
     el('div',{class:'fields'},selectField('Look in the game','theme',map.theme,THEMES.map(theme=>[theme,THEME_NAME[theme]??title(theme)]),v=>set({theme:v})),
       el('label',{class:'field wide toggle',title:'Doors and drawers down the counter\'s front and ends, and dressed wall cupboards. Scenery only.'},
-        el('input',{type:'checkbox',checked:!!map.cabinets,data:{key:'cabinets'},onchange:event=>set({cabinets:event.target.checked})}),'Fitted cabinets under the counter')),
+        el('input',{type:'checkbox',checked:!!map.cabinets,data:{key:'cabinets'},onchange:event=>set({cabinets:event.target.checked})}),'Fitted cabinets under the counter'),
+      el('label',{class:'field wide toggle',title:'The ground is the kitchen floor, not a counter: tiles, and a room whose walls stand at the edges, with a window. Scenery only.'},
+        el('input',{type:'checkbox',checked:!!map.floor,data:{key:'floor'},onchange:event=>set({floor:event.target.checked})}),'Kitchen floor (a room round it)')),
     el('h3',{},'Zombie navigation'),
     el('div',{class:'fields'},
       numberField('Grid cell','cell',map.nav.cell,{step:.01,min:.01,max:.5},v=>set({nav:{cell:v}})),

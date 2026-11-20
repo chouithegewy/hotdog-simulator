@@ -10,7 +10,7 @@ const rgb=hex=>{const n=parseInt(hex.slice(1),16);return [(n>>16)/255,(n>>8&255)
 const scale=(c,k)=>[c[0]*k,c[1]*k,c[2]*k];
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=v=>{const l=Math.hypot(...v)||1;return v.map(c=>c/l)};
 const COLOR=Object.fromEntries(Object.entries(STYLE).map(([name,hex])=>[name,rgb(hex)]));
-const SELECT=rgb('#2f7df0'),COUNTER=rgb('#e9e4d4'),YELLOW=rgb('#e9b824'),RAMP=rgb('#cdd4d4'),BUN=rgb('#e0a95a'),SAUSAGE=rgb('#b4472e'),ZOMBIE=rgb('#5d9447'),GUN=rgb('#55626a'),INK=rgb('#18242a'),BRASS=rgb('#e2b04a');
+const SELECT=rgb('#2f7df0'),COUNTER=rgb('#e9e4d4'),TILE=rgb('#cfc6b2'),YELLOW=rgb('#e9b824'),RAMP=rgb('#cdd4d4'),BUN=rgb('#e0a95a'),SAUSAGE=rgb('#b4472e'),ZOMBIE=rgb('#5d9447'),GUN=rgb('#55626a'),INK=rgb('#18242a'),BRASS=rgb('#e2b04a');
 // The kitchen's own things (src/kitchen.rs has their palette): metals, wood, paper, the paints of labels, lids and spices, fruit, the fitted cabinets, the floor.
 const KIT={steel:rgb('#a8adb2'),chrome:rgb('#d6dbe0'),black:rgb('#1a1c1e'),ceramic:rgb('#ede8dc'),paper:rgb('#f7f5ef'),card:rgb('#94704a'),beech:rgb('#bd8a54'),
   walnut:rgb('#5a371e'),wire:rgb('#e4e4de'),glass:rgb('#d1eaf2'),basin:rgb('#9aa1a6'),hole:rgb('#0b0d0e'),
@@ -352,6 +352,39 @@ function thing(mesh,glass,block){
       f.tube([-w*.3,h*.3,d/2],[-w*.3,h*.25,d/2+.07],.0035,KIT.black,6);f.tube([-w*.3,h*.25,d/2+.07],[-w*.3-.06,h*.1,d/2+.15],.0035,KIT.black,6);
       break;
     }
+    case 'fridge':{
+      // A fridge on the kitchen floor: its body, the door across the front standing a little ajar from its hinge on the left, the lit inside showing through the
+      // gap, a handle down the opening edge, and a grille at its foot.
+      const door=.07,open=.21,c=Math.cos(open),s=Math.sin(open),axes=[[c,0,s],[0,1,0],[-s,0,c]],hinge=[-w/2,0,-d/2+door];
+      f.box([0,h/2,door/2],[w/2,h/2,d/2-door/2],COLOR.fridge);
+      f.box([0,h*.55,-d/2+door+.002],[w/2-.03,h*.4,.002],rgb('#fff6dc'));
+      f.box([0,.04,-d/2+door-.004],[w/2-.02,.03,.004],KIT.black);
+      const at=([x,y,z])=>[hinge[0]+x*c-z*s,y,hinge[2]+x*s+z*c];
+      f.oriented(at([w/2,h/2+.03,-door/2]),axes,[w/2,h/2-.03,door/2],scale(COLOR.fridge,1.08));
+      f.oriented(at([w*.9,h*.62,-door-.02]),axes,[.012,h*.22,.012],KIT.steel);
+      break;
+    }
+    case 'oven':{
+      // A freestanding range: its body, the oven door's dark glass and the bar handle over it, a drawer at its foot, knobs along the front of the hob, four burners
+      // on top, and the backguard with the clock's green glow.
+      const top=h-.06;
+      f.box([0,top/2,0],[w/2,top/2,d/2],COLOR.oven);
+      f.box([0,top*.48,-d/2-.002],[w*.4,top*.24,.002],rgb('#141618'));
+      f.tube([-w*.38,top*.8,-d/2-.03],[w*.38,top*.8,-d/2-.03],.011,KIT.steel,8);
+      f.box([0,top*.1,-d/2-.002],[w*.44,top*.07,.002],scale(COLOR.oven,1.3));
+      for(const x of [-.36,-.18,.18,.36])f.tube([x*w,top-.04,-d/2],[x*w,top-.04,-d/2-.025],.018,KIT.black,10);
+      for(const [x,z] of [[-.24,-.17],[.24,-.17],[-.24,.17],[.24,.17]])f.post(x*w,top,z*d,Math.min(w*.17,d*.16),.012,KIT.black);
+      f.box([0,top+.03,d/2-.03],[w/2,.03,.03],scale(COLOR.oven,1.2));
+      f.box([0,top+.035,d/2-.061],[.04,.012,.001],rgb('#53e08a'));
+      break;
+    }
+    case 'pet-bowl':{
+      // A pet's steel bowl on the floor: a wide foot narrowing to the rim, and kibble in it.
+      const r=Math.min(w,d)/2;
+      f.revolve([0,0,0],[[r,0],[r*.82,h],[r*.74,h],[r*.6,h*.25],[0,h*.25]],COLOR['pet-bowl']);
+      f.post(0,h*.25,0,r*.55,h*.3,rgb('#8a5a2b'));
+      break;
+    }
     default:{
       // A chrome tap: a round base, a column, a gooseneck arching out over the sink in front to its outlet, and a lever on its side.
       const reach=.1,top=Math.max(.04,h-reach-.013);
@@ -447,8 +480,8 @@ export class Solid {
     const tint=(color,item)=>chosen.has(item.id)?[color[0]*.45+SELECT[0]*.55,color[1]*.45+SELECT[1]*.55,color[2]*.45+SELECT[2]*.55]:color;
     // Tints what was added to the mesh since `from` when the item is selected.
     const paint=(from,item)=>{if(chosen.has(item.id))for(let i=from;i<mesh.data.length;i+=9)for(let k=0;k<3;k++)mesh.data[i+6+k]=mesh.data[i+6+k]*.45+SELECT[k]*.55};
-    // The counter top, with a hole where each sink is sunk into it.
-    for(const [x0,z0,x1,z1] of counterTop(map))mesh.box(x0,-.05,z0,x1,0,z1,COUNTER);
+    // The counter top, with a hole where each sink is sunk into it; on a map whose ground is the kitchen floor, the floor's tiles.
+    for(const [x0,z0,x1,z1] of counterTop(map))mesh.box(x0,-.05,z0,x1,0,z1,map.floor?TILE:COUNTER);
     for(const sink of map.sinks??[]){const from=mesh.data.length;basin(mesh,sink);paint(from,sink)}
     // What stands on the kitchen floor, 0.9 m below the counter top: the fitted cabinets under the counter, the bins beside it, and the floor itself round them.
     const bins=map.props.filter(prop=>prop.kind==='bin');

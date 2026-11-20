@@ -370,21 +370,30 @@ pub fn build(world: &mut World, map: &Map) {
     // The counter top reaches a little past the playable area, as the kitchen's own does.
     let [x0, z0, x1, z1] = map.bounds.map(|v| v as f32);
     // The sun, lights, haze and foliage place themselves around the playable rectangle.
+    // (A map whose ground is the kitchen floor has a room of its own round it, its ceiling higher: `floor`.)
     if let Some(mut arena) = world.get_resource_mut::<crate::visuals::ArenaBounds>() {
         let (min, max) = (Vec2::new(x0, z0), Vec2::new(x1, z1));
-        if arena.min != min || arena.max != max {
+        let ceiling = if map.floor { FLOOR + crate::floor::HEIGHT } else { crate::visuals::ArenaBounds::default().ceiling };
+        if arena.min != min || arena.max != max || arena.ceiling != ceiling || arena.room != map.floor {
             arena.min = min;
             arena.max = max;
+            arena.ceiling = ceiling;
+            arena.room = map.floor;
         }
     }
-    // The kitchen's walls stand round it, further out for a bigger counter.
-    crate::fridge::fit_room(world, map.bounds);
-    // The counter top, with a hole for each sink (`kitchen` draws the sinks).
-    for piece in crate::kitchen::counter_top(map) {
-        slab(world, kit, "Counter", &kit.counter, piece.map(|v| v as f32), FLOOR - crate::kitchen::SLAB, crate::kitchen::SLAB);
+    // The kitchen's walls stand round it, further out for a bigger counter. (A floor's room is its own, `floor` builds it.)
+    if !map.floor {
+        crate::fridge::fit_room(world, map.bounds);
+        // The counter top, with a hole for each sink (`kitchen` draws the sinks).
+        for piece in crate::kitchen::counter_top(map) {
+            slab(world, kit, "Counter", &kit.counter, piece.map(|v| v as f32), FLOOR - crate::kitchen::SLAB, crate::kitchen::SLAB);
+        }
     }
     for (index, block) in map.blocks.iter().enumerate() {
         let rect = block.rect.map(|v| v as f32);
+        if crate::floor::drawn_block(map, block) {
+            continue;
+        }
         match (block.style.as_str(), block.facing) {
             ("microwave", Some(side)) => microwave(world, kit, index, block, rect, side),
             ("toaster", Some(side)) => toaster(world, kit, block, rect, side),
@@ -397,8 +406,8 @@ pub fn build(world: &mut World, map: &Map) {
         }
     }
     // A deck is a raised floor: a plate on four legs, so whatever stands beneath it stays in view.
-    // (A round deck is a steamer: `dojo` draws it.)
-    for deck in map.decks.iter().filter(|deck| !crate::dojo::round(deck)) {
+    // (A round deck is a steamer: `dojo` draws it. On the kitchen floor a deck stands solid: `floor` draws it.)
+    for deck in map.decks.iter().filter(|deck| !crate::dojo::round(deck) && !map.floor) {
         let [x0, z0, x1, z1] = deck.rect.map(|v| v as f32);
         let (height, material) = (deck.height as f32, kit.style(&deck.style));
         let plate = height.min(0.025);
@@ -425,7 +434,7 @@ pub fn build(world: &mut World, map: &Map) {
         }
     }
     let mut turrets = 0;
-    for prop in &map.props {
+    for prop in map.props.iter().filter(|prop| !crate::floor::drawn_prop(map, prop)) {
         match prop {
             Prop::Box { rect, base, height, style } => {
                 slab(world, kit, "Prop", &kit.style(style), rect.map(|v| v as f32), FLOOR + *base as f32, *height as f32);
@@ -457,14 +466,35 @@ pub fn build(world: &mut World, map: &Map) {
     crate::loose::build(world, map);
     // A Forts map's bases, forcefield and bacon.
     crate::forts::build(world, map);
+    // The kitchen floor's room, cabinets, fridge, oven and lights (on any other map, nothing).
+    crate::floor::build(world, map);
 }
 
-/// The map to start on: `--map <file>` natively, the page's map in a browser, otherwise the bundled one.
-/// An unreadable or invalid map is an error carrying the reason.
+/// The map a mode is played on when none is named (as the page's `ownMap`, lobby.js): Forts needs a Forts layout and
+/// Titan a titan layout, and the bundled map (Counter Siege) has neither. None for a mode that plays there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub fn own_map(mode: Option<kitchen_sim::rules::Mode>) -> Option<&'static str> {
+    use kitchen_sim::rules::Mode;
+    match mode? {
+        Mode::Forts => Some("pillow-fort"),
+        Mode::KungFu => Some("kung-fu-dojo"),
+        Mode::Titan => Some("titans-kitchen"),
+        _ => None,
+    }
+}
+
+/// The map to start on: `--map <file>` natively (with none, the map of the mode `--rules` asks for: [`own_map`]), the
+/// page's map in a browser, otherwise the bundled one. An unreadable or invalid map is an error carrying the reason.
 pub fn choose(options: &crate::runtime::Options) -> Result<Map, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         if options.map.is_empty() {
+            if let Some(name) = own_map(options.rules().mode()).filter(|_| options.connect.is_empty()) {
+                let path = std::path::Path::new(&crate::runtime::asset_directory()).join("maps").join(format!("{name}.json"));
+                if let Some(map) = std::fs::read_to_string(&path).ok().and_then(|text| Map::parse(&text).ok()) {
+                    return Ok(map);
+                }
+            }
             return Ok(Map::bundled());
         }
         let text = std::fs::read_to_string(&options.map).map_err(|error| format!("{}: {error}", options.map))?;

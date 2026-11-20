@@ -4,7 +4,7 @@
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-import {line,SWATCH,COLOURS,header,sides,WISHES,nextGame,options,holds,MODES,MODE_NAME,modeText,asked,choosing,CARDS_MAP,KUNGFU_MAP,replayText,replayRow,replayHref,replayLength,trailNote,trailLine,TRAIL,replayStart,lightAddress,fullAddress,replayTrouble,REPLAY_GUARD,REPLAY_RECENT} from '../lobby.js';
+import {line,SWATCH,COLOURS,header,sides,WISHES,nextGame,options,holds,MODES,MODE_NAME,modeText,asked,choosing,CARDS_MAP,KUNGFU_MAP,TITAN_MAP,ownMap,TITAN_PICKS,titanOptions,titanValue,titanText,replayText,replayRow,replayHref,replayLength,trailNote,trailLine,TRAIL,replayStart,lightAddress,fullAddress,replayTrouble,REPLAY_GUARD,REPLAY_RECENT} from '../lobby.js';
 
 test('the page shows names and chat as text, never as markup',()=>{
  // A stand-in for the document: elements only take text, classes and children, as the real ones are used.
@@ -37,7 +37,7 @@ test('the page says what is next (Random until the fridge opens, then the map dr
  const roster={choice:{name:'random',title:'Random',mode:'forts',theme:'',random:true},playing:{name:'pillow-fort',title:'Pillow Fort',mode:'forts',theme:'kitchen'},maps};
  assert.equal(nextGame(roster),'Forts · Random map');assert.equal(nextGame(roster,true),'Forts · Pillow Fort · kitchen');assert.equal(nextGame({...roster,choice:maps[2]}),'Siege · Horde Night · night');assert.equal(nextGame(null),'');
  assert.deepEqual(options(roster,'siege').map(o=>[o.value,o.text]),[['random','Random'],['counter-siege','Counter Siege · kitchen'],['counter-siege-v2','Counter Siege (v2) · kitchen'],['horde-night','Horde Night · night']]);
- assert.deepEqual(options(roster,'forts').map(o=>o.value),['random','pillow-fort']);assert.deepEqual(MODES,['siege','forts','ffa','cards','kungfu']);
+ assert.deepEqual(options(roster,'forts').map(o=>o.value),['random','pillow-fort']);assert.deepEqual(MODES,['siege','forts','ffa','cards','kungfu','titan']);
 });
 
 test('Free For All: a third mode, played on any map, each listed with the mode it was made for',()=>{
@@ -50,7 +50,7 @@ test('Free For All: a third mode, played on any map, each listed with the mode i
 
 test('Fully Loaded: a fourth mode, played only on Counter Siege, so its map list is that one map and no Random',()=>{
  const maps=[{name:'counter-siege',title:'Counter Siege',mode:'siege',theme:'kitchen'},{name:'counter-siege-v2',title:'Counter Siege',mode:'siege',theme:'kitchen'},{name:'horde-night',title:'Horde Night',mode:'siege',theme:'night'},{name:'pillow-fort',title:'Pillow Fort',mode:'forts',theme:'kitchen'}];
- assert.deepEqual(MODES,['siege','forts','ffa','cards','kungfu'],'after Free For All');assert.equal(MODE_NAME.cards,'Fully Loaded');assert.equal(CARDS_MAP,'counter-siege','the map the server plays it on (lobby.rs default_map)');
+ assert.deepEqual(MODES.slice(0,4),['siege','forts','ffa','cards'],'after Free For All');assert.equal(MODE_NAME.cards,'Fully Loaded');assert.equal(CARDS_MAP,'counter-siege','the map the server plays it on (lobby.rs default_map)');
  assert.equal(modeText({mode:'cards'}),'Cards at a little table on the microwave: flip toppings, stop before you double up. First to 100.');
  assert.deepEqual(options({maps},'cards').map(o=>[o.value,o.text]),[['counter-siege','Counter Siege · kitchen']],'no Random, no other map, no (v2) to tell it from');
  assert.deepEqual(options({maps:maps.slice(2)},'cards'),[],'without Counter Siege there is nothing to choose');assert.deepEqual(options(null,'cards'),[]);
@@ -103,7 +103,7 @@ test('Fully Loaded: the address asks for it, and what the page sends for it is a
 
 test('Kung Fu: a fifth mode, its maps those made for it (the dojo), with Random; the address can ask for it',()=>{
  const maps=[{name:'counter-siege',title:'Counter Siege',mode:'siege',theme:'kitchen'},{name:'pillow-fort',title:'Pillow Fort',mode:'forts',theme:'kitchen'},{name:'kung-fu-dojo',title:'Kung Fu Dojo',mode:'kungfu',theme:'kitchen'}];
- assert.equal(MODES.at(-1),'kungfu');assert.equal(MODE_NAME.kungfu,'Kung Fu');assert.equal(KUNGFU_MAP,'kung-fu-dojo');
+ assert.equal(MODES[4],'kungfu');assert.equal(MODE_NAME.kungfu,'Kung Fu');assert.equal(KUNGFU_MAP,'kung-fu-dojo');
  assert.deepEqual(options({maps},'kungfu').map(o=>[o.value,o.text]),[['random','Random'],['kung-fu-dojo','Kung Fu Dojo · kitchen']]);
  assert.deepEqual(options({maps},'siege').map(o=>o.value),['random','counter-siege'],'the dojo is not a siege map');
  assert.ok(options({maps},'ffa').some(o=>o.text==='Pillow Fort · Forts · kitchen')&&!options({maps},'ffa').some(o=>o.value==='kung-fu-dojo'),'Free For All lists every gun map with what it was made for, and the dojo is Kung Fu\'s alone');
@@ -168,6 +168,42 @@ test('a replay that cannot be played is said so by its kind, with a retry only w
  assert.equal(replayTrouble('anything else')[0],'This replay cannot be played');
 });
 
+test('Titan: a sixth mode, its map the one made for it (the siege and Free For All may be played there too); the leader chooses who is the titan, and everyone sees who it is',()=>{
+ assert.deepEqual([MODES.at(-1),MODE_NAME.titan,TITAN_MAP],['titan','Titan','titans-kitchen']);
+ // The roster as the server sends it: Titan's Kitchen holds Titan, the siege, Free For All and the cards; no other map holds Titan.
+ const maps=[
+  {name:'counter-siege',title:'Counter Siege',mode:'siege',theme:'kitchen',modes:['siege','ffa','cards'],why:{titan:'Counter Siege has no Titan layout: it cannot be played as Titan.'}},
+  {name:'kung-fu-dojo',title:'Kung Fu Dojo',mode:'kungfu',theme:'kitchen',modes:['kungfu'],why:{titan:'Kung Fu Dojo is a Kung Fu map: it cannot be played as Titan.'}},
+  {name:'titans-kitchen',title:"Titan's Kitchen",mode:'titan',theme:'night',modes:['siege','ffa','cards','titan'],why:{forts:"Titan's Kitchen has no Forts layout"}},
+ ];
+ assert.deepEqual(options({maps},'titan').map(o=>[o.value,o.text,!!o.disabled]),[['random','Random',false],['titans-kitchen',"Titan's Kitchen · night",false]],'only its own map, nothing greyed');
+ assert.ok(options({maps},'ffa').some(o=>o.value==='titans-kitchen'&&!o.disabled&&o.text==="Titan's Kitchen · Titan · night"),'Free For All plays on it, saying what it was made for');
+ assert.ok(options({maps},'siege').some(o=>o.value==='titans-kitchen'&&!o.disabled));
+ // A server that does not list the modes: the maps made for Titan.
+ assert.deepEqual(options({maps:maps.map(({modes,why,...e})=>e)},'titan').map(o=>o.value),['random','titans-kitchen']);
+ assert.match(modeText({mode:'titan'}),/^Titan · one giant hotdog against everyone else/);
+ assert.equal(nextGame({choice:{name:'titans-kitchen',title:"Titan's Kitchen",mode:'titan',theme:'night'}}),"Titan · Titan's Kitchen · night");
+ assert.deepEqual(asked('?mp&mode=titan'),{mode:'titan',map:null});
+ // The chooser: auto, a bot, a random player, me, then every other player by name (the value sent is its member id).
+ const members=[{id:1,name:'Ann',player:1},{id:2,name:'Ben',player:2},{id:3,name:'<b>Cy</b>',player:3}];
+ assert.deepEqual(TITAN_PICKS,['auto','bot','random','me']);
+ assert.deepEqual(titanOptions({members},1).map(o=>o.value),['auto','bot','random','me','2','3']);
+ assert.equal(titanOptions({members},1).at(-1).text,'<b>Cy</b>','a name as text');
+ const roster=titan=>({mode:'titan',members,titan});
+ assert.deepEqual([titanValue(roster(null),1),titanValue(roster({pick:'bot'}),1),titanValue(roster({pick:'random'}),1),titanValue(roster({pick:'member',member:1}),1),titanValue(roster({pick:'member',member:3}),1),titanValue(roster({pick:'me',member:1}),2)],
+  ['auto','bot','random','me','3','1']);
+ // Who it is, before anyone readies up: by name once the server has settled it, "You" on that player's page, a bot, or how it will be drawn.
+ assert.equal(titanText(roster({pick:'member',member:2,player:2,name:'Ben'}),1),'The titan: Ben');
+ assert.equal(titanText(roster({pick:'member',member:2,player:2,name:'Ben'}),2),'You are the titan');
+ assert.equal(titanText(roster({pick:'member',member:3,player:null,name:null}),1),'The titan: <b>Cy</b>');
+ assert.equal(titanText(roster({pick:'bot',member:null,player:null,name:null}),1),'The titan: a bot');
+ assert.match(titanText(roster({pick:'random',member:null,player:null,name:null}),1),/random player, drawn as the round starts/);
+ assert.match(titanText(roster({pick:'auto',member:null,player:null,name:null}),1),/a bot under three players/);
+ assert.equal(titanText({mode:'siege',members}),'');
+ // The assets folder has the map, made for the mode.
+ const arena=JSON.parse(readFileSync(new URL('../assets/maps/titans-kitchen.json',import.meta.url),'utf8'));assert.deepEqual([arena.mode,arena.name,arena.floor],['titan',"Titan's Kitchen",true]);
+});
+
 test('a page that was ended says what it was doing', () => {
  assert.equal(TRAIL,'hotdog-trail');
  const note=trailNote({now:5,up:11.4,what:'replay',readout:' 58 FPS  ·  WebGPU · Auto · Low · 45% ',canvas:'578x1250',screen:'428x926 at 3x',memory:412*2**20,replay:{state:'playing',clock:10400}});
@@ -179,4 +215,10 @@ test('a page that was ended says what it was doing', () => {
  assert.equal(trailLine(trailNote({now:1,up:2,what:'replay',replay:{state:'playing',clock:125000}})),'ended 2 s after loading, at 2:05 of the replay');
  // Nothing kept, or something else under the name: nothing said.
  for(const none of [null,undefined,'','{','[]','"x"','{"up":"soon"}',7])assert.equal(trailLine(none),'');
+});
+
+test('alone with no map named, a mode that needs its own map gets it', () => {
+ assert.deepEqual(['forts','titan','siege','ffa','cards','kungfu',null,undefined,'toString'].map(ownMap),['pillow-fort','titans-kitchen','','','','kung-fu-dojo','','','']);
+ // The files are there, and are made for those modes.
+ for(const mode of ['forts','kungfu','titan']){const map=JSON.parse(readFileSync(new URL(`../assets/maps/${ownMap(mode)}.json`,import.meta.url),'utf8'));assert.equal(map.mode,mode)}
 });

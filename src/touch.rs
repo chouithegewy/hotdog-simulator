@@ -21,6 +21,9 @@
 //!   instead ([`FU_KEYS`]): Fire strikes light (held), Scope heavy, Melee kicks, Carry blocks (held), Use grabs, Stim
 //!   dodges, Prone is the special (lit when the chi is full, [`can::CHI`]), and Swap takes the next style
 //!   ([`Pad::next_style`]: the wheel has no key to press).
+//! * as the titan ([`can::GIANT`], Titan mode) the page labels them for the giant and each presses its titan action's
+//!   key ([`TITAN_KEYS`]): Fire swats (held), Scope smashes, Melee stomps, Stim charges (dim while it cools down,
+//!   [`can::STIM_WAIT`]); Jump and Crouch are everyone's.
 //!
 //! In return the page is told what this player can do now ([`state`], a handful of bits, sent when they
 //! change), so that it shows only the buttons that do something.
@@ -86,6 +89,13 @@ const FU_KEYS: [(u32, Action, Input); 6] = [
     (PRONE, Action::Special, Input::Key(KeyCode::KeyT)),
 ];
 
+/// Titan: the buttons that press the giant's action's key while this player is the titan, and its default key.
+const TITAN_KEYS: [(u32, Action, Input); 3] = [
+    (MELEE, Action::Stomp, Input::Key(KeyCode::KeyF)),
+    (STIM, Action::Charge, Input::Key(KeyCode::ShiftLeft)),
+    (SCOPE, Action::Smash, Input::Mouse(MouseButton::Right)),
+];
+
 /// What the page is told this player can do, as bits (touch.js has the same numbers).
 pub mod can {
     /// In a round with a hotdog of its own to play (not the demo, a cut scene or the pause between rounds).
@@ -143,6 +153,8 @@ pub mod can {
     /// A replay is watched (replay/): none of the game's buttons, the viewer's own controls instead (replay/page.rs); a
     /// drag looks round, two fingers fly the free camera (the stick) and pinch.
     pub const REPLAY: u32 = 1 << 30;
+    /// Titan: this player is the giant: the buttons are its moves (Swat, Smash, Stomp, Charge, Jump, Crouch).
+    pub const GIANT: u32 = 1 << 31;
 }
 
 /// This frame's touch input that the keys cannot carry, for `arena::tick` and the lobby.
@@ -209,9 +221,15 @@ fn apply(down: u32, taps: u32, held: u32, keys: &mut ButtonInput<KeyCode>, mouse
 /// Swap nothing). Returns what this pad holds now.
 #[allow(clippy::too_many_arguments)]
 fn apply_bound(down: u32, taps: u32, held: u32, pressed: &mut [Option<Input>; 14], bindings: &Bindings, fu: bool, keys: &mut ButtonInput<KeyCode>, mouse: &mut ButtonInput<MouseButton>) -> u32 {
+    apply_keys(down, taps, held, pressed, bindings, if fu { &FU_KEYS } else { &[] }, fu, keys, mouse)
+}
+/// `apply_bound` with the buttons that press another action's key (`swaps`: Kung Fu's FU_KEYS, the titan's TITAN_KEYS),
+/// and Swap pressing nothing (`fu`: the style goes round by `Pad::next_style`).
+#[allow(clippy::too_many_arguments)]
+fn apply_keys(down: u32, taps: u32, held: u32, pressed: &mut [Option<Input>; 14], bindings: &Bindings, swaps: &[(u32, Action, Input)], fu: bool, keys: &mut ButtonInput<KeyCode>, mouse: &mut ButtonInput<MouseButton>) -> u32 {
     let mut now = 0;
     for (i, (bit, action, default)) in KEYS.into_iter().enumerate() {
-        let (action, default) = match FU_KEYS.iter().find(|(b, ..)| *b == bit).filter(|_| fu) {
+        let (action, default) = match swaps.iter().find(|(b, ..)| *b == bit) {
             Some((_, action, default)) => (*action, *default),
             None => (action, default),
         };
@@ -273,6 +291,11 @@ pub fn state(g: &Game, lobby: bool, seen: Option<&crate::cards::Seen>) -> u32 {
     };
     let mut s = PLAY | ALIVE;
     let flag = |on: bool, bit: u32| if on { bit } else { 0 };
+    // Titan: the giant's buttons, and whether its charge is cooling down.
+    if let Some(view) = g.titan.as_ref().filter(|v| v.titan != 0 && v.titan == me.id) {
+        let cooling = view.ready[kitchen_sim::titan::READY_CHARGE] > g.elapsed + 0.05;
+        return s | GIANT | flag(cooling, STIM_WAIT) | flag(g.crouch, CROUCH);
+    }
     // Kung Fu: the fight's buttons, and whether the special is ready.
     if let Some(view) = g.kungfu.as_ref() {
         let full = view.fighter(me.id).is_some_and(|f| f.chi >= kitchen_sim::kungfu::CHI_MAX - 1e-3);
@@ -352,7 +375,9 @@ pub(crate) fn press(
     if pad.held != 0 || f.down != 0 || f.taps != 0 {
         let bindings = bindings.map_or_else(Bindings::default, |b| b.clone());
         let (held, mut pressed) = (pad.held, pad.pressed);
-        pad.held = apply_bound(f.down, f.taps, held, &mut pressed, &bindings, fu, &mut keys, &mut mouse);
+        // (As the titan its moves' keys: TITAN_KEYS.)
+        let giant = game.as_deref().is_some_and(|g| crate::titan::titan_id(g) == Some(g.me()));
+        pad.held = if giant { apply_keys(f.down, f.taps, held, &mut pressed, &bindings, &TITAN_KEYS, false, &mut keys, &mut mouse) } else { apply_bound(f.down, f.taps, held, &mut pressed, &bindings, fu, &mut keys, &mut mouse) };
         pad.pressed = pressed;
     }
     pad.next_style = fu && f.taps & SWAP != 0;
@@ -653,5 +678,29 @@ mod tests {
         let (mut keys, mut mouse) = (ButtonInput::<KeyCode>::default(), ButtonInput::<MouseButton>::default());
         apply(HINTS, HINTS, 0, &mut keys, &mut mouse);
         assert!(keys.just_pressed(KeyCode::KeyH), "it presses H");
+    }
+
+    /// As the titan the buttons press its moves' keys (rebound, too) and the page is told it is the giant; a small
+    /// hotdog's buttons are the gun basics' as ever.
+    #[test]
+    fn as_the_titan_the_buttons_are_its_moves() {
+        let mut bindings = Bindings::default();
+        bindings.assign(Action::Stomp, 0, Input::Key(KeyCode::KeyG)).unwrap();
+        let (mut keys, mut mouse) = (ButtonInput::default(), ButtonInput::default());
+        apply_keys(MELEE | STIM | SCOPE, MELEE | STIM | SCOPE, 0, &mut [None; 14], &bindings, &TITAN_KEYS, false, &mut keys, &mut mouse);
+        assert!(keys.pressed(KeyCode::KeyG) && !keys.pressed(KeyCode::KeyF), "the stomp's own key");
+        assert!(keys.pressed(KeyCode::ShiftLeft) && mouse.pressed(MouseButton::Right), "the charge and the smash");
+        assert!(bindings.just(Action::Stomp, &keys, &mouse) && bindings.just(Action::Charge, &keys, &mouse) && bindings.held(Action::Smash, &keys, &mouse));
+        assert_eq!(can::GIANT, 1 << 31);
+        let map = || kitchen_sim::map::Map::parse(include_str!("../assets/maps/titans-kitchen.json")).unwrap();
+        for (pick, giant) in [("me", true), ("bot", false)] {
+            let mut app = crate::arena::test_app(&format!("mode=titan&titan={pick}"));
+            app.add_systems(Update, crate::arena::tick);
+            crate::arena::load_map(app.world_mut(), map());
+            crate::arena::test_frame(&mut app, 0.05);
+            let s = state(app.world().resource::<Game>(), false, None);
+            assert_eq!(s & can::GIANT != 0, giant, "{pick}");
+            assert_eq!(s & can::FIGHT, 0);
+        }
     }
 }

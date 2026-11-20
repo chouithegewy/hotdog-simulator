@@ -291,6 +291,9 @@ pub const BACKSTAB: u8 = 14;
 /// Standing on a hot griddle (griddle.rs): the attacker is the hotdog that last switched it on (0 for one that burned on its
 /// own doing), the place is where the victim stood and the direction nothing.
 pub const BURN: u8 = 15;
+/// A blow of the titan's (titan.rs: a step, a charge, a smash, a swat, a stomp, a kick, a landing): the attacker is the
+/// titan, and the titan's view says which move it was.
+pub const TITAN: u8 = 17;
 /// Added to a round's kind on a hotdog's record (`kind_of`: the ketchup sniper's 2 becomes 66) when it struck the face
 /// for more than a body hit would have done (FACE): a client marks it. Every other part of the record is the round's.
 /// `plain_kind` takes it off again; Kung Fu's BLOW (16) and every other kind is below it.
@@ -557,6 +560,8 @@ enum Met {
     Zombie(u32),
     /// A hotdog, and where the round met its head if it did (head.rs `hit`).
     Hotdog(u32, Option<Vec3>),
+    /// The titan (titan.rs), the zone the round met and where.
+    Titan(u32, crate::titan::Zone, Vec3),
     Swarm(u32),
 }
 /// Where a round ended, or a body it hit on its way, kept briefly so renderers can splatter it.
@@ -872,6 +877,10 @@ pub struct Feast {
     pub griddles: Vec<crate::griddle::Griddle>,
     /// Kung Fu (kungfu.rs): the fighters' states, while the rules (`rules.kungfu`) say the hotdogs fight hand to hand.
     pub kungfu: Option<crate::kungfu::Dojo>,
+    /// Titan (titan.rs): the titan's state, while the rules (`rules.titan`) say one giant hotdog fights the rest; and the
+    /// titan of the round before (a new round's choice rotates from it).
+    pub titan: Option<crate::titan::Titan>,
+    pub(crate) titan_previous: Option<u32>,
 }
 impl Feast {
     /// A round on the map the game ships with.
@@ -973,15 +982,19 @@ impl Feast {
             came_back: HashMap::new(),
             griddles,
             kungfu: None,
+            titan: None,
+            titan_previous: None,
         };
         feast.base = Some(feast.level.clone());
         // A map made for Forts is played by its rules, with six hotdogs (unless the rules say otherwise: `set_rules`).
         if Mode::made_for(&feast.level.map) == Mode::Forts {
             feast.fortify();
         }
-        // A Kung Fu map (the dojo) is played as Kung Fu (kungfu.rs).
+        // A Kung Fu map (the dojo) is played as Kung Fu (kungfu.rs), and a titan arena as Titan (titan.rs).
         if feast.level.map.mode == crate::kungfu::MODE {
             feast.set_rules(crate::rules::Rules { kungfu: true, ..Default::default() });
+        } else if feast.level.map.mode == crate::titan::MODE {
+            feast.set_rules(crate::rules::Rules { titan: true, ..Default::default() });
         }
         feast
     }
@@ -994,12 +1007,20 @@ impl Feast {
         let tune = std::mem::take(&mut self.tune);
         // (Kung Fu: what the people chose to fight in, and the events' numbers, outlast the round.)
         let dojo = self.kungfu.take();
+        // (Titan: who was the titan, so that the next is chosen by turns.)
+        let titan = self.titan_last();
         // (The same map: Free For All's spots stand as they were surveyed.)
         let spots = std::mem::take(&mut self.spots);
         // (Without the drapes' walls: every loose object goes back where the map has it.)
         *self = Self::on(self.base.clone().unwrap_or_else(|| self.level.clone()), self.demo);
         (self.tune, self.spots) = (tune, spots);
         (self.round, self.follow, self.card_seed) = (round, follow, seed);
+        // (Whatever the map's own setting out cast, the round is set out again by the rules below: a titan by turns from
+        // the last round's, and on a titan arena played as another mode, the titan's roster let go.)
+        self.titan_previous = titan;
+        if let Some(t) = self.titan.as_mut() {
+            t.previous = titan;
+        }
         (self.fort_build, self.fort_stale) = times;
         self.bodies.config = config;
         self.props = furnish(&self.level, &self.bodies.config, self.fort.as_ref().is_some_and(|fort| fort.up));
@@ -1109,12 +1130,19 @@ impl Feast {
                 body.crouch = p.crouch;
             }
         }
+        // The titan's body is its size and held where titan.rs has it.
+        self.titan_body();
     }
     /// Copies where the bodies are, and how they are moving, back into the roster.
-    fn report(&mut self) {
+    pub(crate) fn report(&mut self) {
+        // (The titan is where titan.rs puts it: the bodies' world never moves it.)
+        let titan = self.titan_id().unwrap_or(0);
         let Feast { players, enemies, bodies, echo, .. } = self;
         let mut lost = vec![];
         for p in players.iter_mut() {
+            if p.id == titan {
+                continue;
+            }
             let Some(body) = bodies.get(p.id) else {
                 (p.v, p.grounded, p.launched) = ([0.; 3], true, false);
                 continue;
@@ -1148,6 +1176,7 @@ impl Feast {
             self.enemies.retain(|e| e.id != id);
             self.wave_kills += 1;
         }
+        self.titan_body();
     }
     /// Moves every body by one step: walking where it was steered, colliding, falling, flying. Nobody goes
     /// on walking afterwards unless steered afresh.
@@ -1344,6 +1373,10 @@ impl Feast {
     }
     /// A hit shoves the body it lands on along the shot, in proportion to the damage.
     pub(crate) fn nudge(&mut self, body: u32, dir: Vec3, damage: f32) {
+        // (Nothing a hotdog does shoves the titan.)
+        if self.is_titan(body) {
+            return;
+        }
         if let Some(body) = self.bodies.get_mut(body) {
             let push = actor::HIT_IMPULSE * damage as f64;
             body.apply_impulse([dir.x as f64 * push, 0., dir.z as f64 * push]);
@@ -1573,6 +1606,9 @@ impl Feast {
     }
     /// Stim: faster and springier for STIM seconds, at the price of double damage from rivals.
     pub fn stim(&mut self, id: u32) -> bool {
+        if self.is_titan(id) {
+            return false;
+        }
         if self.stage == Stage::RoundOver || self.cards.is_some() || self.kungfu.is_some() {
             return false;
         }
@@ -1640,6 +1676,10 @@ impl Feast {
         if self.cards.is_some() {
             self.sit();
         }
+        // Titan: the titan as it starts, and a small hotdog at a small hotdog's start (titan.rs).
+        if self.titan.is_some() {
+            self.titan_fit(id);
+        }
     }
     /// Walks the hotdog a person is steering by `step` ([x, z] in metres) at once, against the level and the
     /// other bodies, and returns where it now stands. Its jump, its falls and any throw happen in `tick`.
@@ -1694,7 +1734,7 @@ impl Feast {
     /// walking over pads by id, then the bots by id), gets nothing. False when it is not there, out of reach, or (a box
     /// of ammunition, or a gun the hotdog holds) of no use to the hotdog: its reserves are full.
     pub fn pickup(&mut self, id: u32, item: usize) -> bool {
-        let Some(p) = self.player(id).filter(|_| self.cards.is_none() && self.kungfu.is_none()) else {
+        let Some(p) = self.player(id).filter(|_| self.cards.is_none() && self.kungfu.is_none() && !self.is_titan(id)) else {
             return false;
         };
         let Some(item) = self.pickups.get(item) else {
@@ -2043,7 +2083,7 @@ impl Feast {
     /// by the same rule, and the bite heals.
     pub fn melee(&mut self, id: u32, direction: Vec3) -> bool {
         // With the hands full, behind the forcefield (Forts) or at a card table, there is no strike.
-        if self.stage == Stage::RoundOver || self.stage == Stage::Build || self.laden(id) || self.cards.is_some() || self.kungfu.is_some() {
+        if self.stage == Stage::RoundOver || self.stage == Stage::Build || self.laden(id) || self.cards.is_some() || self.kungfu.is_some() || self.is_titan(id) {
             return false;
         }
         let famine = self.famine();
@@ -2083,11 +2123,14 @@ impl Feast {
         let mut rival = None;
         if matches!(self.stage, Stage::FreeForAll | Stage::Fight) {
             let team = self.player(id).map_or(0, |p| p.team);
-            let mate = |t: &Player| self.stage == Stage::Fight && t.team == team;
+            let mate = |t: &Player| (self.stage == Stage::Fight || self.titan.is_some()) && t.team == team;
+            // (The titan's legs stand inside its footprint: the strike reaches a little further on it. Titan has no cats.)
+            let wall = self.screen(origin, dir);
             for t in self.players.iter().filter(|t| t.alive && t.id != id && !mate(t)) {
-                // (Its body or its head, where the nod has it: head.rs.)
-                if let Some(far) = crate::head::hit(t, origin, dir, 0.).map(|h| h.t) {
-                    if far < nearest {
+                let reach = if self.is_titan(t.id) { nearest.max(wall.min(self.tune.range[0] + crate::titan::STRIKE_REACH)) } else { nearest };
+                // (Its body or its head, where the nod has it: head.rs; the titan's, its own shape: titan.rs.)
+                if let Some(far) = self.hit_on(t, origin, dir, 0.).map(|h| h.0) {
+                    if far < reach {
                         nearest = far;
                         rival = Some(t.id);
                         zombie = None;
@@ -2096,6 +2139,13 @@ impl Feast {
             }
         }
         let from = self.player(id).map_or(origin, |p| Vec3::from_array(p.p));
+        if let Some(target) = rival.filter(|t| self.is_titan(*t)) {
+            // (The titan: the strike's damage times where it struck, never a kill from behind: titan.rs.)
+            if let Some((_, zone, point)) = self.player(target).and_then(|t| self.hit_on(t, origin, dir, 0.)) {
+                self.strike_titan(id, self.tune.hotdog[0], zone, point, dir, MELEE, from);
+            }
+            return true;
+        }
         if let Some(target) = rival {
             let (amount, kind) = self.blow_on(target, from, dir);
             self.harm(target, amount, true, Damage::by(kind, id, from, dir));
@@ -2214,8 +2264,13 @@ impl Feast {
             if q.hostile && self.tune.hotdog[w] > 0. {
                 for p in &self.players {
                     if p.id != q.owner && p.alive && !self.allied(q.owner, p.id) && !q.pierced.contains(&p.id) {
-                        // Its body, or its head where the nod has it (head.rs), grown by the round's size.
-                        if let Some(h) = crate::head::hit(p, origin, dir, self.tune.size[w]).filter(|h| h.t < reach) {
+                        // Its body, or its head where the nod has it (head.rs), grown by the round's size; the titan's
+                        // own shape and its zones (titan.rs).
+                        if self.is_titan(p.id) {
+                            if let Some((t, zone, point)) = self.hit_on(p, origin, dir, self.tune.size[w]).filter(|h| h.0 < reach) {
+                                met.push((t, Met::Titan(p.id, zone, point)));
+                            }
+                        } else if let Some(h) = crate::head::hit(p, origin, dir, self.tune.size[w]).filter(|h| h.t < reach) {
                             met.push((h.t, Met::Hotdog(p.id, (h.part == crate::head::Part::Head).then_some(h.point))));
                         }
                     }
@@ -2295,6 +2350,18 @@ impl Feast {
                         if !splash {
                             self.nudge(id, dir, damage);
                         }
+                        if !pierce {
+                            (early, opponent) = (Some(t), Some(id));
+                            break;
+                        }
+                    }
+                    Met::Titan(id, zone, at) => {
+                        let damage = self.tune.hotdog[w] * q.power();
+                        q.pierced.push(id);
+                        self.splat(&q, point);
+                        let from = if splash { point } else { origin - dir * q.travelled };
+                        self.strike_titan(q.owner, damage, zone, at, dir, kind_of(w), from);
+                        self.friendly_fire_events += 1;
                         if !pierce {
                             (early, opponent) = (Some(t), Some(id));
                             break;
@@ -2384,10 +2451,11 @@ impl Feast {
             self.maul(q.owner, id, self.tune.zombie[w] * power * f);
         }
         if q.hostile {
+            let titan = self.titan_id().unwrap_or(0);
             let rivals: Vec<(u32, f32, Vec3)> = self
                 .players
                 .iter()
-                .filter(|p| Some(p.id) != struck && p.id != q.owner && p.alive && !self.allied(q.owner, p.id))
+                .filter(|p| Some(p.id) != struck && p.id != q.owner && p.alive && !self.allied(q.owner, p.id) && p.id != titan)
                 .map(|p| (p.id, share(self, body_gap(p, point)), chest(p) - point))
                 .filter(|(_, f, _)| *f > 0.)
                 .collect();
@@ -2395,11 +2463,20 @@ impl Feast {
                 self.harm(id, self.tune.hotdog[w] * power * f, true, Damage::by(kind_of(w), q.owner, point, out));
                 self.friendly_fire_events += 1;
             }
+            // The titan: by the nearest point of its shape, times the zone that point is in (titan.rs).
+            if let Some(p) = self.player(titan).filter(|p| Some(p.id) != struck && p.id != q.owner && p.alive && !self.allied(q.owner, p.id)) {
+                let (gap, near, zone) = self.titan_shape().unwrap_or_else(|| crate::titan::Shape::of(p, crate::titan::Move::Idle)).gap(point);
+                let f = share(self, (gap, near));
+                if f > 0. {
+                    self.strike_titan(q.owner, self.tune.hotdog[w] * power * f, zone, near, (near - point).normalize_or_zero(), kind_of(w), point);
+                    self.friendly_fire_events += 1;
+                }
+            }
         }
         // The blast throws whoever it could have hurt: zombies always, hotdogs once rounds are hostile, and
         // never the shooter. Cover shields from the throw as it does from the damage.
         self.embody();
-        let spared: Vec<Actor> = self.bodies.actors.iter().filter(|body| body.id < CAT && (!q.hostile || body.id == q.owner || self.allied(q.owner, body.id))).cloned().collect();
+        let spared: Vec<Actor> = self.bodies.actors.iter().filter(|body| body.id < CAT && (!q.hostile || body.id == q.owner || self.allied(q.owner, body.id) || self.is_titan(body.id))).cloned().collect();
         for body in &spared {
             self.bodies.remove(body.id);
         }
@@ -2768,9 +2845,12 @@ impl Feast {
         if self.drill(id, dt) {
             return;
         }
-        // Kung Fu has bots of its own (kungfu.rs).
+        // Kung Fu has bots of its own (kungfu.rs), and so has Titan (titan.rs).
         if self.kungfu.is_some() {
             return self.kungfu_bot(id, dt);
+        }
+        if self.titan.is_some() {
+            return self.titan_bot(id, dt);
         }
         // A bot on a griddle that is on, or still warm, walks off it (griddle.rs).
         if self.scorched(id) {
@@ -3016,6 +3096,10 @@ impl Feast {
                 self.reset();
             } else {
                 self.settle(dt);
+                // (A felled or roaring titan's figure goes on as drawn.)
+                if self.titan.is_some() {
+                    self.titan_figure(dt);
+                }
             }
             return;
         }
@@ -3143,6 +3227,10 @@ impl Feast {
         // Kung Fu: the moves run on and land, before the bots choose their next (kungfu.rs).
         if self.kungfu.is_some() {
             self.kungfu_step(dt);
+        }
+        // Titan: the titan's move runs on, its blows land and its waves spread, before the bots choose (titan.rs).
+        if self.titan.is_some() {
+            self.titan_step(dt);
         }
         // The pickups that give rounds alone are taken by walking over them (magazine.rs), before the bots' errands.
         self.scavenge();

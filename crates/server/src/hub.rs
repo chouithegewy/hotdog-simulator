@@ -33,6 +33,12 @@
 //! sent `{type:'kungfu', ...View}` when it sits down and at every frame step at which the view has changed since it was
 //! last sent (a move running on does not change it: the client works out the time into it from `started`).
 //!
+//! **Titan.** The titan (kitchen_sim::titan `View`: who it is, its health, its move and when it began, its crouch, its
+//! cooldowns, its stagger, the reinforcements, each small hotdog's damage dealt, and the events of the last
+//! `titan::EVENT_LIFE` seconds) travels as JSON text beside the frames too: every game socket is sent
+//! `{type:'titan', ...View}` when it sits down, at every frame step at which the view has changed since it was last sent
+//! (its clock left out), and at least every `titan::SYNC` seconds.
+//!
 //! **Reserves and reloads.** A frame carries each gun's magazine as it always has; each hotdog's reserve and the reload
 //! under way (kitchen_sim::magazine `Stock`) travel as JSON text beside the frames: every game socket is sent
 //! `{type:'ammo',hotdogs:[Stock]}` when it sits down and at every frame step at which any of it has changed (a reload
@@ -48,6 +54,7 @@ use crate::protocol::{self, PROTOCOL, is, truthy};
 use kitchen_sim::cards;
 use kitchen_sim::griddle;
 use kitchen_sim::kungfu;
+use kitchen_sim::titan;
 use kitchen_sim::net::{self as wire, Batch, Events, Frame, Header, Mine, State};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -155,6 +162,9 @@ pub struct Hub {
     griddles_sent: Option<((u32, Vec<u32>), u32)>,
     /// The fight (kitchen_sim::kungfu) as every game socket was last told it, its clock left out; None before the first.
     kungfu_sent: Option<String>,
+    /// The titan (kitchen_sim::titan) as every game socket was last told it, its clock left out, and the step it was told
+    /// at; None before the first.
+    titan_sent: Option<(String, u32)>,
     /// The hotdogs' reserves and reloads (kitchen_sim::magazine) as every game socket was last told them; None before
     /// the first.
     ammo_sent: Option<String>,
@@ -164,7 +174,7 @@ pub struct Hub {
 }
 impl Hub {
     pub fn new(lobby: Lobby, net: Net) -> Hub {
-        Hub { lobby, peers: BTreeMap::new(), net, tick: 0, game: 0, cards_sent: None, griddles_sent: None, kungfu_sent: None, ammo_sent: None, stats: Stats::default(), replays: crate::replay::Replays::off() }
+        Hub { lobby, peers: BTreeMap::new(), net, tick: 0, game: 0, cards_sent: None, griddles_sent: None, kungfu_sent: None, titan_sent: None, ammo_sent: None, stats: Stats::default(), replays: crate::replay::Replays::off() }
     }
     /// The number of the game being played (a new map's game is a new one).
     pub fn game(&self) -> u64 {
@@ -365,6 +375,26 @@ impl Hub {
         }
         self.replays.text(self.game, self.tick, &told);
     }
+    /// Every frame step: the titan (Titan) to every game socket if it has changed since it was last sent, or SYNC seconds
+    /// have passed. A game that is not Titan has nothing to send.
+    fn tell_titan(&mut self) {
+        let Some(view) = self.lobby.game.feast.titan_view() else {
+            self.titan_sent = None;
+            return;
+        };
+        // (The clock and the stride run on all the time: a client carries them on between views.)
+        let key = serde_json::to_string(&titan::View { elapsed: 0., stride: 0., drive: 0., ..view.clone() }).unwrap_or_default();
+        let every = (titan::SYNC * self.net.tick as f32).max(1.) as u32;
+        if self.titan_sent.as_ref().is_some_and(|(sent, at)| *sent == key && self.tick.wrapping_sub(*at) < every) {
+            return;
+        }
+        self.titan_sent = Some((key, self.tick));
+        let told = titan_text(&view);
+        for peer in self.peers.values().filter(|peer| peer.player.is_some()) {
+            peer.outbox.send_text(told.clone());
+        }
+        self.replays.text(self.game, self.tick, &told);
+    }
     /// Every frame step: every hotdog's reserves and the reload under way (kitchen_sim::magazine `Stock`), what a frame
     /// does not carry, to every game socket when any of it has changed since it was last sent. Kung Fu and the card table
     /// have no guns, and nothing to send.
@@ -432,6 +462,7 @@ impl Hub {
             self.cards_sent = None;
             self.griddles_sent = None;
             self.kungfu_sent = None;
+            self.titan_sent = None;
             self.ammo_sent = None;
             println!("Sandbox: {} on {}", self.lobby.game.rules().text(), lobby::played(&self.lobby.game));
         }
@@ -461,6 +492,10 @@ impl Hub {
         // The fight, as it stands, in Kung Fu.
         if let Some(view) = self.lobby.game.feast.kungfu_view() {
             outbox.send_text(kungfu_text(&view));
+        }
+        // The titan, as it stands, in Titan.
+        if let Some(view) = self.lobby.game.feast.titan_view() {
+            outbox.send_text(titan_text(&view));
         }
         // The reserves and reloads, as they stand, where there are guns.
         let feast = &self.lobby.game.feast;
@@ -495,6 +530,7 @@ impl Hub {
                 self.cards_sent = None;
                 self.griddles_sent = None;
                 self.kungfu_sent = None;
+                self.titan_sent = None;
                 self.ammo_sent = None;
                 println!("Sandbox over: back to {}", lobby::played(&self.lobby.game));
             }
@@ -513,6 +549,7 @@ impl Hub {
             self.cards_sent = None;
             self.griddles_sent = None;
             self.kungfu_sent = None;
+            self.titan_sent = None;
             self.ammo_sent = None;
             let told = (!self.lobby.game.feast.tune.text().is_empty()).then(|| self.tuning());
             let game = &self.lobby.game;
@@ -539,6 +576,7 @@ impl Hub {
             self.tell_cards();
             self.tell_griddles();
             self.tell_kungfu();
+            self.tell_titan();
             self.tell_ammo();
         }
         let spent = started.elapsed();
@@ -657,6 +695,16 @@ pub fn kungfu_text(view: &kungfu::View) -> String {
         view: &'a kungfu::View,
     }
     protocol::encode(&Told { r#type: "kungfu", view })
+}
+/// The titan as game sockets are told it: `{type:'titan', ...View}` (kitchen_sim::titan).
+pub fn titan_text(view: &titan::View) -> String {
+    #[derive(Serialize)]
+    struct Told<'a> {
+        r#type: &'static str,
+        #[serde(flatten)]
+        view: &'a titan::View,
+    }
+    protocol::encode(&Told { r#type: "titan", view })
 }
 /// The hotdogs' reserves and reloads as game sockets are told them: `{type:'ammo',hotdogs}` with each one's
 /// kitchen_sim::magazine `Stock` (its id, its reserve by gun, and the reload under way: `gun`, 0 for none, `at` the round's

@@ -79,11 +79,13 @@ pub enum Mode {
     Ffa,
     Cards,
     KungFu,
+    /// Titan (titan.rs): one giant hotdog against the rest.
+    Titan,
 }
 impl Mode {
-    pub const ALL: [Mode; 5] = [Mode::Siege, Mode::Forts, Mode::Ffa, Mode::Cards, Mode::KungFu];
-    /// The gun modes, whose basics are the same.
-    pub const GUNS: [Mode; 3] = [Mode::Siege, Mode::Forts, Mode::Ffa];
+    pub const ALL: [Mode; 6] = [Mode::Siege, Mode::Forts, Mode::Ffa, Mode::Cards, Mode::KungFu, Mode::Titan];
+    /// The gun modes, whose basics are the same (Titan's small hotdogs play by them).
+    pub const GUNS: [Mode; 4] = [Mode::Siege, Mode::Forts, Mode::Ffa, Mode::Titan];
     /// Its name in a rules line, a page's address, the lobby and the server's --mode.
     pub fn name(self) -> &'static str {
         match self {
@@ -92,6 +94,7 @@ impl Mode {
             Mode::Ffa => "ffa",
             Mode::Cards => "cards",
             Mode::KungFu => crate::kungfu::MODE,
+            Mode::Titan => crate::titan::MODE,
         }
     }
     /// What the screen and the lobby call it.
@@ -102,6 +105,7 @@ impl Mode {
             Mode::Ffa => "Free For All",
             Mode::Cards => "Fully Loaded",
             Mode::KungFu => "Kung Fu",
+            Mode::Titan => "Titan",
         }
     }
     pub fn named(name: &str) -> Option<Mode> {
@@ -129,6 +133,8 @@ impl Map {
             Mode::KungFu if !dojo => Some(format!("{} is not a Kung Fu map", self.name)),
             Mode::KungFu | Mode::Cards => None,
             _ if dojo => Some(format!("{} is a Kung Fu map", self.name)),
+            // Titan needs the titan layout (a map tagged `titan`: titan.rs, the interface's section 1).
+            Mode::Titan if self.mode != crate::titan::MODE => Some(format!("{} has no Titan layout", self.name)),
             Mode::Siege if self.spawns.is_empty() => Some(format!("{} has no cat spawn point", self.name)),
             Mode::Forts if self.fortress().is_none() => Some(format!("{} has no Forts layout (two bases, a field and a bacon spot)", self.name)),
             _ => None,
@@ -206,6 +212,11 @@ pub struct Rules {
     pub cards: bool,
     /// Kung Fu (kungfu.rs): hands and feet only.
     pub kungfu: bool,
+    /// Titan (titan.rs): one giant hotdog against the rest; who is to be the titan (`titan=`), and how many small hotdogs
+    /// (`smalls=`, None for titan::SMALLS).
+    pub titan: bool,
+    pub pick: crate::titan::Pick,
+    pub smalls: Option<usize>,
     pub sandbox: bool,
     /// The sandbox's loadout for a person's hotdog (empty: the usual guns).
     pub weapons: Vec<usize>,
@@ -238,6 +249,11 @@ impl Rules {
         // The bots' skill, in any game.
         if let Some(skill) = get("skill").or(get("difficulty")).or(get("bots")).and_then(crate::aim::Skill::named) {
             rules.skill = skill;
+        }
+        // Titan: who is the titan, and how many small hotdogs (in any game of it).
+        if rules.titan {
+            rules.pick = get("titan").and_then(crate::titan::Pick::named).unwrap_or_default();
+            rules.smalls = get("smalls").and_then(|n| n.parse::<usize>().ok()).map(|n| n.clamp(crate::titan::SMALLS_MIN, crate::titan::SMALLS_MAX));
         }
         if !rules.sandbox {
             return rules;
@@ -288,6 +304,14 @@ impl Rules {
         if self.skill != crate::aim::Skill::Normal {
             out.push(format!("skill={}", self.skill.name()));
         }
+        if self.titan {
+            if self.pick != crate::titan::Pick::Auto {
+                out.push(format!("titan={}", self.pick.name()));
+            }
+            if let Some(n) = self.smalls {
+                out.push(format!("smalls={n}"));
+            }
+        }
         if !self.sandbox {
             if endless {
                 out.push("ammo=inf".into());
@@ -318,7 +342,7 @@ impl Rules {
     /// The rules of a game of `mode` (None: the map's own), as nothing else asked for: Free For All's rounds run out.
     pub fn of(mode: Option<Mode>) -> Rules {
         let is = |m: Mode| mode == Some(m);
-        Rules { siege: is(Mode::Siege), forts: is(Mode::Forts), ffa: is(Mode::Ffa), finite_ammo: is(Mode::Ffa), cards: is(Mode::Cards), kungfu: is(Mode::KungFu), ..Default::default() }
+        Rules { siege: is(Mode::Siege), forts: is(Mode::Forts), ffa: is(Mode::Ffa), finite_ammo: is(Mode::Ffa), cards: is(Mode::Cards), kungfu: is(Mode::KungFu), titan: is(Mode::Titan), ..Default::default() }
     }
     /// The rules of a game of `mode` on `map`: as `of`, but naming no mode where it is the one the map was made for, so
     /// that a game in a map's own mode says what it always did (an empty line for a siege or Forts).
@@ -329,16 +353,20 @@ impl Rules {
     /// The mode the rules ask for by name (None: the map's own). Of two (a struct written by hand), the first in
     /// `Mode::ALL`'s order but the siege: Free For All, Fully Loaded and Kung Fu, as the game plays them, go first.
     pub fn mode(&self) -> Option<Mode> {
-        [(self.ffa, Mode::Ffa), (self.cards, Mode::Cards), (self.kungfu, Mode::KungFu), (self.forts, Mode::Forts), (self.siege, Mode::Siege)].into_iter().find(|(on, _)| *on).map(|(_, m)| m)
+        [(self.ffa, Mode::Ffa), (self.cards, Mode::Cards), (self.kungfu, Mode::KungFu), (self.titan, Mode::Titan), (self.forts, Mode::Forts), (self.siege, Mode::Siege)].into_iter().find(|(on, _)| *on).map(|(_, m)| m)
     }
     /// Whether the game is played by rules of its own beyond a siege's or Forts' (Free For All, the sandbox, Kung Fu:
     /// respawns, their own end); the siege and Forts, named or not, are not.
     pub fn active(&self) -> bool {
-        self.ffa || self.sandbox || self.kungfu
+        self.ffa || self.sandbox || self.kungfu || self.titan
     }
     /// Whether rounds never run out: the sandbox's `ammo=inf`, or Free For All without `finite_ammo`.
     pub fn unlimited(&self) -> bool {
         ((self.ffa && !self.finite_ammo) || (self.sandbox && self.ammo)) && !self.kungfu
+    }
+    /// How many small hotdogs a game of Titan has.
+    pub fn small_count(&self) -> usize {
+        self.smalls.unwrap_or(crate::titan::SMALLS).clamp(crate::titan::SMALLS_MIN, crate::titan::SMALLS_MAX)
     }
     /// Whether the sandbox's cats are out.
     pub fn roaming(&self) -> bool {
@@ -346,7 +374,7 @@ impl Rules {
     }
     /// Whether a round ends (Free For All's, by kills or the clock; the sandbox's never does).
     pub fn ends(&self) -> bool {
-        (self.ffa || self.kungfu) && !self.sandbox
+        (self.ffa || self.kungfu || self.titan) && !self.sandbox
     }
     /// Kills (Kung Fu: KOs) that win a round that ends.
     pub fn goal(&self) -> u32 {
@@ -354,10 +382,22 @@ impl Rules {
     }
     /// Seconds a round that ends lasts.
     pub fn time(&self) -> f32 {
-        if self.kungfu { crate::kungfu::TIME } else { FFA_TIME }
+        if self.kungfu {
+            crate::kungfu::TIME
+        } else if self.titan {
+            crate::titan::TIME
+        } else {
+            FFA_TIME
+        }
     }
     /// The line at the top of the screen as a round begins.
     pub fn banner(&self) -> String {
+        if self.titan {
+            return match self.sandbox {
+                true => "SANDBOX: TITAN. NO CLOCK, NO END.".into(),
+                false => format!("TITAN. BRING THE GIANT DOWN: AIM FOR THE BACK OF ITS HEAD. {} MINUTES.", crate::titan::TIME as u32 / 60),
+            };
+        }
         if self.kungfu {
             return match self.sandbox {
                 true => "SANDBOX: KUNG FU. NO CLOCK, NO END.".into(),
@@ -390,11 +430,22 @@ impl Feast {
     pub fn set_rules(&mut self, mut rules: Rules) {
         // A Kung Fu map (the dojo) is played as Kung Fu whatever the rules say.
         rules.kungfu |= self.level.map.mode == crate::kungfu::MODE;
+        // A titan arena is played as Titan when the rules name no mode (titan.rs).
+        rules.titan |= rules.mode().is_none() && self.level.map.mode == crate::titan::MODE;
         self.rules = rules;
         self.ends = 0.;
-        // (A table only stands while the rules say so; nor does a dojo.)
+        // (A table only stands while the rules say so; nor does a dojo, nor a titan.)
         self.cards = None;
         self.kungfu = None;
+        if self.titan.is_some() {
+            self.titan_previous = self.titan_last();
+            self.titan = None;
+            self.untitan();
+        }
+        if self.rules.titan {
+            self.unfort();
+            return self.open_titan();
+        }
         if self.rules.kungfu {
             self.unfort();
             return self.open_dojo();
@@ -458,6 +509,8 @@ impl Feast {
             Mode::Cards
         } else if self.kungfu.is_some() || self.rules.kungfu {
             Mode::KungFu
+        } else if self.titan.is_some() || self.rules.titan {
+            Mode::Titan
         } else if self.rules.ffa {
             Mode::Ffa
         } else if self.fort.is_some() {
@@ -469,7 +522,7 @@ impl Feast {
     /// The siege's famine: its free for all after the wave, where hunger bites and the hotdogs may bite and eat each other
     /// (Free For All, which shares its stage, has none of that).
     pub fn famine(&self) -> bool {
-        self.stage == Stage::FreeForAll && !self.rules.ffa && self.kungfu.is_none() && self.cards.is_none()
+        self.stage == Stage::FreeForAll && !self.rules.ffa && self.kungfu.is_none() && self.cards.is_none() && self.titan.is_none()
     }
     /// A Forts round becomes another mode's (Free For All, a siege, a table, a dojo): the forcefield, the bases and the
     /// bacon go, and the five hotdogs of a siege stand at the map's starts (until Free For All's opening spreads them,
@@ -503,6 +556,10 @@ impl Feast {
         // Kung Fu: no guns; the six styles are what a hotdog "holds" (kungfu.rs).
         if self.kungfu.is_some() {
             return self.arm_for_kungfu(id);
+        }
+        // Titan: the titan holds no gun (titan.rs).
+        if self.is_titan(id) {
+            return self.disarm_titan(id);
         }
         let loadout: Vec<usize> = if self.rules.sandbox { self.rules.weapons.iter().copied().filter(|w| (1..GUNS).contains(w)).collect() } else { vec![] };
         let unlimited = self.rules.unlimited();
@@ -549,6 +606,10 @@ impl Feast {
         }
         if !self.rules.active() {
             return;
+        }
+        // Titan: the titan does not come back, and a small hotdog only from the pool (titan.rs).
+        if self.titan.is_some() {
+            return self.titan_mourn(id);
         }
         let delay = if self.rules.sandbox { SANDBOX_RESPAWN } else if self.rules.kungfu { crate::kungfu::RESPAWN } else { FFA_RESPAWN };
         if let Some(p) = self.player_mut(id) {
@@ -603,6 +664,8 @@ impl Feast {
         };
         let at = if self.rules.kungfu {
             Some(self.dojo_spot(id))
+        } else if self.titan.is_some() {
+            Some(self.titan_haven(id))
         } else if self.rules.ffa {
             Some(self.haven(id))
         } else if self.rules.here && !old.fallen {
@@ -611,7 +674,7 @@ impl Feast {
             None
         };
         self.fit(id);
-        let shield = if self.rules.ffa || self.rules.kungfu { SHIELD } else { 0. };
+        let shield = if self.rules.ffa || self.rules.kungfu || self.titan.is_some() { SHIELD } else { 0. };
         let Some(p) = self.player_mut(id) else {
             return;
         };
@@ -622,6 +685,9 @@ impl Feast {
                 self.came_back.insert(id, glam::Vec2::new(at.x, at.z));
             }
             self.embody();
+        }
+        if self.titan.is_some() {
+            self.titan_back(id);
         }
     }
     /// The sandbox's `bots=N`: the first N bots (by seat) play; the rest are benched (dead, eaten, nowhere to be seen)
@@ -678,6 +744,10 @@ impl Feast {
     /// Free For All: the round ends with FFA_KILLS kills, or when its time is up (whoever has most kills wins; a tie
     /// at the top is a draw). The line at the top of the screen is the score.
     fn final_whistle(&mut self) {
+        // Titan has an end of its own (titan.rs).
+        if self.titan.is_some() {
+            return self.titan_whistle();
+        }
         let top = self.players.iter().map(|p| p.kills).max().unwrap_or(0);
         let leaders: Vec<u32> = self.players.iter().filter(|p| p.kills == top).map(|p| p.id).collect();
         let timed = self.ends > 0. && self.elapsed >= self.ends;

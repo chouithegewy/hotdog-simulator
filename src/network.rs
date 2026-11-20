@@ -344,6 +344,11 @@ pub fn receive(world: &mut World) {
                             crate::fight::hear(&mut world.resource_mut::<crate::arena::Game>(), &v);
                             None
                         }
+                        // Titan: the titan as the server has it (kitchen_sim::titan::View), read from `Game::titan` (titan/).
+                        "titan" => {
+                            crate::titan::hear(&mut world.resource_mut::<crate::arena::Game>(), &v);
+                            None
+                        }
                         // Every hotdog's reserve and the reload under way (reload.rs, kitchen_sim::magazine), which the
                         // frames do not carry: on joining and whenever any of it changes.
                         "ammo" => {
@@ -423,17 +428,18 @@ pub fn send(world: &mut World) {
     let now = world.resource::<Time<Real>>().elapsed_secs_f64();
     world.resource_scope(|world, mut net: Mut<Network>| {
         // The other hotdogs, each frame where the timeline has them (arena/online.rs put them in the roster).
-        let (roster, stage_over, table, reloads, kungfu) = {
+        let (roster, stage_over, table, reloads, kungfu, titan) = {
             let g = world.resource::<crate::arena::Game>();
             let reloads: std::collections::HashMap<u32, f32> = g.roster.iter().map(|p| (p.id, crate::reload::progress(g, p.id))).collect();
-            (g.roster.clone(), matches!(g.phase_name(), "RoundOver" | "Rest"), crate::cards::at_table(g), reloads, g.kung_fu())
+            (g.roster.clone(), matches!(g.phase_name(), "RoundOver" | "Rest"), crate::cards::at_table(g), reloads, g.kung_fu(), crate::titan::titan_id(g))
         };
         for p in &roster {
             let Some(&(entity, _)) = net.remotes.get(&p.id) else {
                 continue;
             };
             let (color, talk, consumed) = net.looks.get(&p.id).cloned().unwrap_or_default();
-            let shown = if consumed { Visibility::Hidden } else { Visibility::Visible };
+            // (The titan's hotdog is drawn as the titan: titan/.)
+            let shown = if consumed || titan == Some(p.id) { Visibility::Hidden } else { Visibility::Visible };
             if world.get::<Visibility>(entity) != Some(&shown) {
                 world.entity_mut(entity).insert(shown);
             }

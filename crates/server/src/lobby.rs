@@ -13,7 +13,7 @@
 //!
 //! From a page:   {type:'hello',name,color,team?,token?}  {type:'profile',name?,color?}  {type:'ready',ready}
 //!                {type:'chat',text}  {type:'signal',to,data}  {type:'speaking',level}  {type:'mic',state}
-//!                {type:'team',team}  {type:'choose',mode?,map?}
+//!                {type:'team',team}  {type:'choose',mode?,map?,titan?}
 //! To a page:     {type:'welcome',id,token,colours,limits,history,mode,teams}
 //!                {type:'roster',stage,countdown,capacity,members,mode,leader,choice,playing,maps,...}
 //!                {type:'chat',from,name,color,text}  {type:'system',text}  {type:'notice',text}
@@ -34,6 +34,11 @@
 //! that can hold the mode. When the fridge opens on a map (or a mode) other than the one being played, a fresh game is
 //! built for it and takes over with everyone seated as they were (`switch`); the game loop tells every client the new
 //! map.
+//!
+//! **Titan** (kitchen_sim::titan) is played on a map with the titan layout (Titan's Kitchen). The leader also chooses who
+//! is the titan (`{type:'choose',titan}`: 'auto' (a bot while fewer than three people play, else a person drawn), 'bot',
+//! 'random' (a person drawn), 'me', or another member's id), in the lobby only; the roster says the choice and the
+//! hotdog cast (`titan`). Bots and people drawn take turns, round after round (`Game::cast`).
 //!
 //! The dev sandbox (a server started with --dev): the first game socket to join an empty game may ask for it
 //! (`sandbox`), and the game is built afresh by its rules on the map it names (or the one being played), with no
@@ -71,6 +76,7 @@ pub fn default_map(mode: &str) -> &'static str {
     match mode {
         "forts" => "pillow-fort",
         KUNGFU => "kung-fu-dojo",
+        TITAN => "titans-kitchen",
         _ => "counter-siege",
     }
 }
@@ -81,6 +87,7 @@ pub fn mode_name(mode: &str) -> &'static str {
         FFA => "Free For All",
         CARDS => "Fully Loaded",
         KUNGFU => "Kung Fu",
+        TITAN => "Titan",
         _ => "such",
     }
 }
@@ -95,7 +102,32 @@ pub fn played(game: &Game) -> String {
 pub const FFA: &str = "ffa";
 pub const CARDS: &str = "cards";
 pub const KUNGFU: &str = kitchen_sim::kungfu::MODE;
-pub const PLAYS: [&str; 5] = ["siege", "forts", FFA, CARDS, KUNGFU];
+pub const TITAN: &str = kitchen_sim::titan::MODE;
+pub const PLAYS: [&str; 6] = ["siege", "forts", FFA, CARDS, KUNGFU, TITAN];
+/// Titan: who the leader chooses to be the titan (the page's `titan` names: 'auto', 'bot', 'random', 'me', or a
+/// member's id).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TitanChoice {
+    #[default]
+    Auto,
+    Bot,
+    Random,
+    /// The leader, whoever leads when the round is cast.
+    Me,
+    Member(u32),
+}
+impl TitanChoice {
+    /// The page's name for it.
+    pub fn name(self) -> &'static str {
+        match self {
+            TitanChoice::Auto => "auto",
+            TitanChoice::Bot => "bot",
+            TitanChoice::Random => "random",
+            TitanChoice::Me => "me",
+            TitanChoice::Member(_) => "member",
+        }
+    }
+}
 /// What a game of an entry is played by: the rules of the mode it is played in (kitchen_sim::rules `Rules::playing`:
 /// naming no mode where it is the map's own siege or Forts, as a game always said).
 pub fn rules_for(entry: &Entry) -> Rules {
@@ -362,6 +394,8 @@ pub struct Lobby {
     played: Option<String>,
     /// The dev sandbox: what was being played and chosen before it took over, while it plays.
     before: Option<(Entry, Entry)>,
+    /// Titan: who the leader chose to be the titan.
+    pub titan: TitanChoice,
     now: Box<dyn Fn() -> f64 + Send>,
     token: Box<dyn FnMut() -> String + Send>,
     draw: Box<dyn FnMut() -> f64 + Send>,
@@ -390,6 +424,7 @@ impl Lobby {
             picked: HashMap::new(),
             played: None,
             before: None,
+            titan: TitanChoice::Auto,
             now,
             token,
             draw,
@@ -710,6 +745,72 @@ impl Lobby {
         self.sent.clear();
         true
     }
+    /// Titan: the leader chooses who is to be the titan ('auto', 'bot', 'random', 'me', or a member's id: see the module's
+    /// documentation), in the lobby before the countdown. A change makes everyone unready. Returns whether it changed;
+    /// whoever is refused is told why.
+    pub fn choose_titan(&mut self, member: u32, asked: &Value) -> bool {
+        let leader = self.lead();
+        let refuse = |lobby: &Lobby, text: &str| {
+            lobby.tell(member, &json!({"type": "notice", "text": text}));
+            false
+        };
+        if Some(member) != leader {
+            return refuse(self, "Only the leader can choose the titan.");
+        }
+        if self.game.phase != Phase::Lobby || self.game.countdown.is_some() {
+            return refuse(self, "The titan can only be chosen in the lobby, before the countdown.");
+        }
+        let choice = match asked {
+            Value::String(name) => match name.as_str() {
+                "auto" => TitanChoice::Auto,
+                "bot" => TitanChoice::Bot,
+                "random" => TitanChoice::Random,
+                "me" => TitanChoice::Me,
+                _ => return refuse(self, "There is no such choice of titan."),
+            },
+            other => match protocol::integer(other).filter(|n| *n >= 0. && *n <= u32::MAX as f64).map(|n| n as u32) {
+                Some(id) if id == member => TitanChoice::Me,
+                Some(id) if self.members.get(&id).is_some_and(|m| m.player.is_some()) => TitanChoice::Member(id),
+                Some(_) => return refuse(self, "That member is not playing."),
+                None => return refuse(self, "There is no such choice of titan."),
+            },
+        };
+        if choice == self.titan {
+            return false;
+        }
+        self.titan = choice;
+        self.game.titan = self.titan_pick();
+        let seated: Vec<u32> = self.list().filter_map(|m| m.player).collect();
+        for p in seated {
+            if self.game.player(p).is_some_and(|p| p.ready) {
+                self.game.ready(p, false);
+            }
+        }
+        let name = |lobby: &Lobby, id: u32| lobby.members.get(&id).map(|m| m.name.clone()).unwrap_or_default();
+        let who = match choice {
+            TitanChoice::Auto => "a bot, or a player drawn when three or more play".to_string(),
+            TitanChoice::Bot => "a bot".into(),
+            TitanChoice::Random => "a player drawn at random".into(),
+            TitanChoice::Me => name(self, member),
+            TitanChoice::Member(id) => name(self, id),
+        };
+        self.system(&format!("{} chose the titan: {who}. Ready up again", name(self, member)));
+        self.sent.clear();
+        true
+    }
+    /// The lobby's choice of titan as the game casts it (kitchen_sim::titan `Pick`): the leader's or a member's seat for
+    /// a person named (Auto once they no longer play).
+    pub fn titan_pick(&self) -> kitchen_sim::titan::Pick {
+        use kitchen_sim::titan::Pick;
+        let seat = |member: Option<u32>| member.and_then(|m| self.members.get(&m)).and_then(|m| m.player).filter(|p| self.game.player(*p).is_some() && !self.game.waiting(*p)).map_or(Pick::Auto, Pick::Seat);
+        match self.titan {
+            TitanChoice::Auto => Pick::Auto,
+            TitanChoice::Bot => Pick::Bot,
+            TitanChoice::Random => Pick::Random,
+            TitanChoice::Me => seat(self.leader),
+            TitanChoice::Member(id) => seat(Some(id)),
+        }
+    }
     /// The fridge opens: the round plays the map the leader chose, or with Random one of the mode's maps drawn now (not
     /// the one played last, while the mode has another). On a map other than the one being played the game is switched
     /// (`switch`): the hotdog each seated member now plays is returned, by member id.
@@ -999,7 +1100,13 @@ impl Lobby {
                 self.team(member, &message["team"]);
             }
             "choose" => {
-                self.choose(member, message.get("mode"), message.get("map"));
+                // (Titan's titan may be chosen alone, or with a mode or a map.)
+                if let Some(titan) = message.get("titan") {
+                    self.choose_titan(member, titan);
+                }
+                if message.get("titan").is_none() || message.get("mode").is_some() || message.get("map").is_some() {
+                    self.choose(member, message.get("mode"), message.get("map"));
+                }
             }
             "chat" => self.chat(member, message),
             // Voice signalling goes from one member's page to another member's page and nowhere else.
@@ -1116,6 +1223,16 @@ impl Lobby {
         } else {
             roster["mode"] = json!(self.mode());
         }
+        // Titan: the choice of titan, and the hotdog cast (for the round being played, or set out next).
+        if self.mode() == TITAN {
+            let player = self.game.feast.titan_id();
+            let member = match self.titan {
+                TitanChoice::Member(id) => Some(id),
+                TitanChoice::Me => self.leader,
+                _ => None,
+            };
+            roster["titan"] = json!({"pick": self.titan.name(), "member": member, "player": player, "name": player.and_then(|p| self.game.player(p)).map(|p| p.name.clone())});
+        }
         // The sandbox's rules, while it plays (the page shows them).
         if self.game.rules().sandbox {
             roster["rules"] = json!(self.game.rules().text());
@@ -1133,6 +1250,8 @@ impl Lobby {
             self.voice(id, 0.);
         }
         self.lead();
+        // (Titan: the game casts the titan by the choice as it stands.)
+        self.game.titan = self.titan_pick();
         let stage = self.game.stage();
         let mut switched = None;
         if stage != self.stage {

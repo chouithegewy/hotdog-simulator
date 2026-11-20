@@ -397,7 +397,7 @@ async fn the_server_lets_the_leader_choose_tells_every_client_the_new_map_before
     wait_for("the binary client's frames were never deltas", || decoded.lock().unwrap().iter().any(|(_, base)| *base > 0).then_some(())).await;
     wait_for("Ann does not lead", || b.lobby.last("roster").filter(|r| r["leader"] == a.member)).await;
     let now = status(addr).await;
-    assert_eq!(json!([now["map"], now["mode"], now["choice"]["name"], now["leader"], now["maps"], now["protocol"]]), json!(["Counter Siege", "siege", "counter-siege", "Ann", 14, 12]));
+    assert_eq!(json!([now["map"], now["mode"], now["choice"]["name"], now["leader"], now["maps"], now["protocol"]]), json!(["Counter Siege", "siege", "counter-siege", "Ann", 15, 12]));
     assert_eq!(wait_for("no snapshot", || a.game.last("snapshot")).await["leader"], a.player);
     // Ben may not choose; Ann chooses Forts on Moonlit Fort, and everyone sees it.
     b.lobby.send(json!({"type": "choose", "mode": "forts"}));

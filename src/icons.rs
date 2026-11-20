@@ -84,13 +84,25 @@ pub enum Icon {
     Broken,
     /// A thin ring to go round another icon (a Toad's iron body round its style).
     Halo,
+    /// Titan: the giant's head, a tall sausage with small eyes high and a grin far too wide; its moves (the charge, two
+    /// chevrons ahead; the ground smash, two fists down on the floor; the swat, an open hand at the end of a sweep; the
+    /// stomp, a boot down on the floor; its hop, an arc up and down to the floor); the weak spot, the back of a head
+    /// with a target on its nape; and on its knees, two chevrons down onto the floor.
+    Titan,
+    Charge,
+    Smash,
+    Swat,
+    Stomp,
+    Leap,
+    Weak,
+    Kneel,
     Gun(u8),
 }
 // (The whole set, which the tests go through.)
 #[allow(dead_code)]
 impl Icon {
     /// Every icon that is drawn by hand, and the seven guns.
-    pub const DRAWN: [Icon; 56] = [
+    pub const DRAWN: [Icon; 64] = [
         Icon::Heart,
         Icon::Bullet,
         Icon::Stim,
@@ -147,6 +159,14 @@ impl Icon {
         Icon::Parry,
         Icon::Broken,
         Icon::Halo,
+        Icon::Titan,
+        Icon::Charge,
+        Icon::Smash,
+        Icon::Swat,
+        Icon::Stomp,
+        Icon::Leap,
+        Icon::Weak,
+        Icon::Kneel,
     ];
     /// The styles' animals, in `kungfu::Style`'s order.
     pub const STYLES: [Icon; 7] = [Icon::Style(0), Icon::Style(1), Icon::Style(2), Icon::Style(3), Icon::Style(4), Icon::Style(5), Icon::Style(6)];
@@ -775,6 +795,58 @@ fn shape(icon: Icon) -> Box<dyn Fn(Vec2) -> bool> {
             (left || right) && !path(p, &crack, 0.03)
         }),
         Icon::Halo => Box::new(|p| ring(p, v(0.5, 0.5), 0.47, 0.47 - STROKE * 0.8)),
+        Icon::Titan => Box::new(|p| {
+            // A tall sausage of a head, two small eyes set high, and a grin across nearly all of it.
+            let head = seg(p, v(0.5, 0.33), v(0.5, 0.67), 0.27);
+            let eyes = circle(p, v(0.4, 0.3), 0.05) || circle(p, v(0.6, 0.3), 0.05);
+            let grin = ellipse(p, v(0.5, 0.52), v(0.22, 0.2)) && !ellipse(p, v(0.5, 0.44), v(0.25, 0.17)) && p.y < 0.74;
+            head && !eyes && !grin
+        }),
+        Icon::Charge => Box::new(|p| {
+            // Two chevrons ahead, and the lines of speed behind them.
+            let chevrons = path(p, &[v(0.34, 0.2), v(0.6, 0.5), v(0.34, 0.8)], STROKE * 0.85) || path(p, &[v(0.58, 0.2), v(0.84, 0.5), v(0.58, 0.8)], STROKE * 0.85);
+            let speed = seg(p, v(0.08, 0.38), v(0.22, 0.38), 0.035) || seg(p, v(0.08, 0.62), v(0.22, 0.62), 0.035);
+            chevrons || speed
+        }),
+        Icon::Smash => Box::new(|p| {
+            // Two fists come down on the floor, their arms from above, the blow's rays out to either side.
+            let fists = rect(p, v(0.27, 0.34), v(0.48, 0.62), 0.06) || rect(p, v(0.52, 0.34), v(0.73, 0.62), 0.06);
+            let arms = rect(p, v(0.32, 0.07), v(0.44, 0.36), 0.03) || rect(p, v(0.56, 0.07), v(0.68, 0.36), 0.03);
+            let floor = rect(p, v(0.07, 0.78), v(0.93, 0.87), 0.02);
+            let rays = seg(p, v(0.2, 0.66), v(0.08, 0.56), 0.035) || seg(p, v(0.8, 0.66), v(0.92, 0.56), 0.035);
+            fists || arms || floor || rays
+        }),
+        Icon::Swat => Box::new(|p| {
+            // An open hand at the end of its sweep, the sweep's arc trailing behind it.
+            let palm = rect(p, v(0.56, 0.38), v(0.86, 0.66), 0.08);
+            let fingers = (0..4).any(|k| seg(p, v(0.6 + 0.075 * k as f32, 0.4), v(0.6 + 0.075 * k as f32, 0.18 + 0.03 * (k as f32 - 1.5).abs()), 0.032));
+            let thumb = seg(p, v(0.58, 0.58), v(0.46, 0.46), 0.035);
+            let arc = path(p, &curve(v(0.1, 0.84), v(0.18, 0.52), v(0.46, 0.68), 10), 0.04) || path(p, &curve(v(0.24, 0.9), v(0.32, 0.72), v(0.52, 0.8), 8), 0.03);
+            palm || fingers || thumb || arc
+        }),
+        Icon::Stomp => Box::new(|p| {
+            // A heavy boot coming down on the floor, the shock out from under it.
+            let boot = poly(p, &[v(0.3, 0.08), v(0.52, 0.08), v(0.52, 0.46), v(0.8, 0.54), v(0.84, 0.68), v(0.3, 0.68)]);
+            let floor = rect(p, v(0.07, 0.8), v(0.93, 0.88), 0.02);
+            let shock = seg(p, v(0.2, 0.72), v(0.1, 0.62), 0.035) || seg(p, v(0.9, 0.74), v(0.92, 0.62), 0.03);
+            boot || floor || shock
+        }),
+        Icon::Leap => Box::new(|p| {
+            // An arc up and down to the floor, its head where it lands.
+            let arc = path(p, &curve(v(0.12, 0.78), v(0.42, -0.08), v(0.76, 0.6), 14), STROKE * 0.7);
+            let floor = rect(p, v(0.07, 0.83), v(0.93, 0.91), 0.02);
+            arc || floor || head(p, v(0.82, 0.76), v(0.45, 1.), 0.24)
+        }),
+        Icon::Weak => Box::new(|p| {
+            // The back of a head on its neck, a target on the nape.
+            let head = circle(p, v(0.5, 0.36), 0.3) || rect(p, v(0.34, 0.5), v(0.66, 0.93), 0.04);
+            let target = ring(p, v(0.5, 0.64), 0.17, 0.1) || circle(p, v(0.5, 0.64), 0.04);
+            head && !target
+        }),
+        Icon::Kneel => Box::new(|p| {
+            // Two chevrons down onto the floor.
+            path(p, &[v(0.2, 0.12), v(0.5, 0.36), v(0.8, 0.12)], STROKE * 0.85) || path(p, &[v(0.2, 0.42), v(0.5, 0.66), v(0.8, 0.42)], STROKE * 0.85) || rect(p, v(0.14, 0.8), v(0.86, 0.89), 0.02)
+        }),
         Icon::Gun(_) => Box::new(|_| false),
     }
 }
