@@ -1,0 +1,86 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (C) 2026 David Nunes-Childs */
+/* The multiplayer lobby: the header, the lobby panel (where the intro has its mission card) and the chat. Loaded with lobby.js. */
+.online .modes{display:none}
+.online .mission{display:none}
+.lobby{position:absolute;left:28px;bottom:28px;width:min(360px,calc(100vw - 56px));max-height:calc(100vh - 150px);overflow:auto;padding:17px 21px 14px;background:#0d1b1be8;border:1px solid #9fc6b333;border-radius:9px;box-shadow:0 8px 30px #0004;backdrop-filter:blur(8px);z-index:3}
+.lobby[hidden],.chat[hidden],.chat-form[hidden]{display:none}
+.lobby .eyebrow{margin:0 0 9px}.lobby .queue-title{margin-top:14px}
+.lobby-row{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:10px;margin:0 0 9px;font-size:12px;color:#9eafa5}
+.lobby-row input[type=text]{width:100%;min-height:32px;padding:5px 9px;border:1px solid #9fc6b355;border-radius:5px;background:#07100fcc;color:#f4f1df;font:550 14px system-ui,sans-serif}
+.lobby-row input[type=text]:focus-visible{outline:2px solid #dfb97b;outline-offset:1px}
+.lobby-colours{display:flex;gap:8px}
+.colour{width:30px;height:30px;padding:0;border:2px solid #f4f1df55;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px #0006}
+.colour:hover{border-color:#f4f1dfaa}.colour.on{border-color:#fff;box-shadow:0 0 0 2px #dfb97b,inset 0 0 0 1px #0006}.colour:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.lobby-teams{display:flex;flex-wrap:wrap;gap:6px}
+.team{min-height:28px;padding:0 10px;border:1px solid #9fc6b355;border-radius:5px;background:#16302c;color:#f4f1df;font:550 12px system-ui,sans-serif;cursor:pointer}
+.team.mustard{border-color:#e3b21c99}.team.ketchup{border-color:#c8281eaa}.team:hover:enabled{background:#1d3f3a}
+.team.on{background:#285a48;box-shadow:0 0 0 2px #dfb97b}.team.mustard.on{background:#6b5208}.team.ketchup.on{background:#6d1712}.team:disabled{color:#8b9892;cursor:default}
+.lobby-mode{margin:2px 0 4px;font-size:12px;line-height:1.45;color:#bacbc1}.lobby-mode[hidden],.lobby-row[hidden]{display:none}
+/* The next game: the leader's mode and map (or Random), shown to everyone; the controls only work for the leader, in the lobby. */
+.lobby-game{margin:0 0 14px;padding:0 0 12px;border-bottom:1px solid #9fc6b322}
+.lobby .game-title{display:flex;align-items:center;gap:6px}
+.lobby-chooser{display:inline-flex;align-items:center;gap:4px;margin-left:auto;letter-spacing:.08em;color:#dfb97b;text-transform:none;font-size:11px}
+.lobby-modes{display:flex;flex-wrap:wrap;gap:6px}
+.mode{flex:1;min-height:30px;padding:0 8px;border:1px solid #9fc6b355;border-radius:5px;background:#16302c;color:#f4f1df;font:600 12px system-ui,sans-serif;white-space:nowrap;cursor:pointer}
+.mode:hover:enabled{background:#1d3f3a}.mode.on{background:#285a48;box-shadow:0 0 0 2px #dfb97b}.mode:disabled{cursor:default}.mode:disabled:not(.on){color:#8b9892}
+.mode:focus-visible,.lobby-pick select:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.lobby-pick{display:flex;align-items:center;gap:8px;min-width:0}
+.lobby-pick select{flex:1;min-width:0;min-height:32px;padding:4px 8px;border:1px solid #9fc6b355;border-radius:5px;background:#07100fcc;color:#f4f1df;font:550 13px system-ui,sans-serif}
+.lobby-pick select:disabled{opacity:1;color:#d5d6c9;background:#0b1716cc;cursor:default}
+.lobby-pick select option{background:#0d1b1b;color:#f4f1df}
+.look{flex:none;padding:3px 7px;border-radius:9px;font:10px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;background:#2c3b37;color:#e8e2cc}
+.look[data-theme=kitchen]{background:#6b4f2a;color:#fbe7c4}.look[data-theme=night]{background:#1f2c5c;color:#cfd9ff}.look[data-theme=jungle]{background:#24502c;color:#d5f2cf}.look[data-theme=random]{background:#4b3a5e;color:#eadcff}
+.crown{flex:none;width:15px;height:11px;fill:#f2c531;filter:drop-shadow(0 1px 1px #0008)}
+.member .crown{margin-left:-2px}
+.chapter .lobby-next{margin:7px 0 0;font:600 12px system-ui,sans-serif;letter-spacing:.02em;color:#f4f1df;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.chapter .lobby-next[hidden]{display:none}.chapter .lobby-next .by{display:inline-flex;align-items:center;gap:4px;font-weight:500;color:#dfb97b}
+.team-head{display:flex;align-items:center;gap:7px;margin-top:5px;padding:0 2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#bacbc1}.team-head:first-child{margin-top:0}
+.team-head b{font-weight:600;color:#f4f1df}.team-head .status{margin-left:auto;font:10px ui-monospace,monospace;letter-spacing:.12em;color:#9eafa5}
+.team-dot{flex:none;width:10px;height:10px;border-radius:2px;box-shadow:0 0 0 1px #0008}
+.lobby-queue{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:4px}
+.member{display:flex;align-items:center;gap:7px;min-height:28px;padding:3px 8px;border-radius:5px;background:#ffffff0a;font-size:13px;color:#d5d6c9}
+.member.me{background:#ffffff14}.member b{font-weight:550;color:#f4f1df;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.member .status{margin-left:auto;font:10px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#9eafa5;white-space:nowrap}
+.member.ready .status{color:#dfb97b}.member.ready{box-shadow:inset 3px 0 0 #dfb97b}
+.swatch{flex:none;width:12px;height:12px;border-radius:50%;border:1.5px solid #f4f1df99;box-shadow:0 0 0 1px #0008}
+.meter{flex:none;width:9px;height:9px;border-radius:50%;background:#52605b;transition:box-shadow .08s,background .08s}
+.meter.none{background:transparent;border:1px solid #52605b}.meter.muted{background:#7a4b3f}.meter.live{background:#7fb59a}
+.meter.speaking{background:#8ff0b6;box-shadow:0 0 0 calc(2px + var(--level,0)*5px) #8ff0b655}
+.volume{flex:none;width:54px;height:14px;margin:0;accent-color:#dfb97b;opacity:.75}.volume:hover,.volume:focus-visible{opacity:1}
+.lobby button#lobby-ready{width:100%;min-height:43px;border:0;border-radius:5px;background:#dfb97b;color:#172321;font:600 12px system-ui,sans-serif;cursor:pointer}
+.lobby button#lobby-ready:hover:enabled{background:#efcd98}.lobby button#lobby-ready.on{background:#8fd7a8}.lobby button#lobby-ready:disabled{background:#263b36;color:#bacbc1;cursor:default}
+.lobby button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.lobby-voice{display:flex;align-items:center;gap:12px;margin:10px 0 0;font-size:12px;color:#bacbc1}
+.lobby-voice button{min-height:30px;padding:0 12px;border:1px solid #9fc6b355;border-radius:5px;background:#16302c;color:#f4f1df;font:550 12px system-ui,sans-serif;cursor:pointer}
+.lobby-voice button.on{background:#285a48;border-color:#8ff0b688}.lobby-voice button:disabled{color:#8b9892;cursor:default;background:#17231f}
+.lobby-voice label{display:flex;align-items:center;gap:6px;cursor:pointer}.lobby-voice input{accent-color:#dfb97b}
+.lobby-note{margin:8px 0 0;font-size:12px;line-height:1.45;color:#f1c2ae}.lobby-note:empty{display:none}
+.lobby .hint{margin:10px 0 0}
+.lobby-legal{margin:6px 0 0;font:10px ui-monospace,monospace;letter-spacing:.06em;color:#8b9892}.lobby-legal a{color:#9eafa5}.lobby-legal a:hover{color:#dfb97b}
+.lobby-replays{margin:10px 0 0;font-size:12px;color:#bacbc1}.lobby-replays summary{cursor:pointer;color:#dfb97b;font-weight:600}
+.lobby-replay-list{list-style:none;margin:6px 0 0;padding:0;max-height:180px;overflow:auto}
+.lobby-replay-list .replay{display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #9fc6b322}
+.lobby-replay-list .replay span{display:flex;flex-direction:column;flex:1;min-width:0}.lobby-replay-list .replay b{font-weight:550;color:#f4f1df;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lobby-replay-list .replay i{font-style:normal;color:#8b9892;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lobby-replay-list a{color:#dfb97b;text-decoration:none;border:1px solid #dfb97b55;border-radius:4px;padding:2px 7px}.lobby-replay-list a.save{color:#bacbc1;border-color:#9fc6b333}
+.lobby-replay-list .replay-note{color:#8b9892;padding:4px 0}
+/* The header keeps the intro's block and gains a backing, so that it reads over the pale fridge wall as well as in the dark. */
+.chapter.lobby-header{z-index:3}
+.chapter.lobby-header .step{font-variant-numeric:tabular-nums}
+/* Chat: bottom right. In the lobby every line stays; during a round a line fades after a while and comes back while the box is open. */
+.chat{position:absolute;right:22px;bottom:44px;width:min(360px,calc(100vw - 44px));display:flex;flex-direction:column;gap:6px;z-index:3;pointer-events:none;font-size:13px;line-height:1.4;color:#f4f1df}
+.chat-log{max-height:min(38vh,280px);overflow:hidden auto;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:#0d1b1bc4;border:1px solid #9fc6b322;scrollbar-width:thin;pointer-events:auto}
+.chat-log:empty{display:none}
+.chat-line{overflow-wrap:anywhere;transition:opacity .6s}.chat-line b{font-weight:600;margin:0 6px 0 5px}.chat-line.mine b{color:#dfb97b}
+.chat-line .swatch{display:inline-block;width:10px;height:10px;vertical-align:-1px}
+.chat-line.system{color:#9eafa5;font:11px ui-monospace,monospace;letter-spacing:.04em}.chat-line.notice{color:#f1c2ae;font-size:12px}
+.chat.round .chat-log{background:transparent;border-color:transparent;text-shadow:0 1px 3px #000,0 0 2px #000;overflow:hidden}
+.chat.round:not(.open) .chat-line.old{opacity:0}.chat.round:not(.open) .chat-line.gone{display:none}
+.chat.round.open .chat-log{background:#0d1b1bd9;border-color:#9fc6b322;overflow:hidden auto}
+.chat-form{pointer-events:auto}.chat-form input{width:100%;min-height:34px;padding:6px 10px;border:1px solid #dfb97b;border-radius:6px;background:#07100fee;color:#f4f1df;font:14px system-ui,sans-serif;outline:none}
+.chat-hint{margin:0;text-align:right;font:10px ui-monospace,monospace;letter-spacing:.12em;color:#9eafa5;text-shadow:0 1px 3px #000}.chat.open .chat-hint{visibility:hidden}
+.chat-voices{display:none;flex-wrap:wrap;justify-content:flex-end;gap:4px 10px;font-size:11px;color:#d5d6c9;text-shadow:0 1px 3px #000}
+.chat.round .chat-voices{display:flex}.voice-chip{display:inline-flex;align-items:center;gap:5px}.voice-chip b{font-weight:550}
+@media(max-height:560px){.lobby{bottom:18px;left:18px;padding:12px 16px;max-height:calc(100vh - 110px)}.lobby .hint{display:none}.chat-log{max-height:26vh}}
+@media(max-width:760px){.chat{bottom:auto;top:96px;width:min(300px,calc(100vw - 44px))}.chat-log{max-height:22vh}}

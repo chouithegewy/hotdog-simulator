@@ -1,0 +1,51 @@
+{
+  "counter-siege.json": {
+    "cols": 90,
+    "rows": 34,
+    "grid": "5ce9635c",
+    "ground": "5bb6bb73"
+  },
+  "awkward.json": {
+    "cols": 162,
+    "rows": 117,
+    "grid": "e71fed23",
+    "ground": "f8dfc394"
+  },
+  "pillow-fort.json": {
+    "cols": 150,
+    "rows": 45,
+    "grid": "9fa6572e",
+    "ground": "c6b42e35"
+  },
+  "the-whole-kitchen-forts.json": {
+    "cols": 210,
+    "rows": 60,
+    "grid": "ae2eb64b",
+    "ground": "2470807d"
+  },
+  "kung-fu-dojo.json": {
+    "cols": 85,
+    "rows": 36,
+    "grid": "9891ebb5",
+    "ground": "649f0e92"
+  },
+  "pillow-fort.json fielded": {
+    "cols": 150,
+    "rows": 45,
+    "grid": "3abe2e0e",
+    "ground": "c6b42e35"
+  },
+  "the-whole-kitchen-forts.json fielded": {
+    "cols": 210,
+    "rows": 60,
+    "grid": "6fbd29cb",
+    "ground": "2470807d"
+  },
+  "canonical": {
+    "awkward.json": "77751b27",
+    "uncanonical.json": "3334795f",
+    "pillow-fort.json": "cb4c5626",
+    "the-whole-kitchen-forts.json": "578e34ef",
+    "kung-fu-dojo.json": "dbdb950b"
+  }
+}

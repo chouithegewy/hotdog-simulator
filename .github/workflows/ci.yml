@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Every test suite (README.md, "Checks" and "Continuous integration and deployment"): on every pull request, on every
+# push to a branch, and called by deploy.yml for the very commit it is about to deploy. One status sums it up for branch
+# protection: `ci-ok`, which passes only when every suite passed (require it before merging into main).
+#
+#   crates   the simulation (crates/kitchen-sim), its C interface (kitchen-ffi), the server and the launchers: release
+#            builds, in one target directory (one cache)
+#   client   the game's own tests, natively, in release (linked against ALSA, udev and Wayland: their -dev packages)
+#   wasm     both browser builds type-checked (cargo check with the web profile, with and without webgpu); nothing is
+#            linked or bound: tools/build-web.sh does that, in deploy.yml and release.yml; and the committed
+#            THIRD_PARTY_LICENSES.html is checked current (tools/build-licenses.sh --check)
+#   node     the map editor's, the lobby's and the page scripts' tests (no build needed)
+#
+# Tests that time a step, a plan or a query against a budget (the simulation's, and a few of the client's) fail on a
+# machine slower or busier than the one the budget was set on: HOTDOG_TIMING_SLACK below multiplies every such budget
+# (kitchen_sim::timing_slack; a developer's machine has none set and keeps the strict ones). The simulation's
+# forts::blueprint::tests::the_bots_building_costs_little_per_step, the one that failed on a busy machine, is also run
+# on its own after the rest of its suite and given one retry, with a warning on the run, by
+# tools/ci/cargo-test-retry.sh; a second failure fails. Nothing else is retried. (The client's card-table tutorial
+# test that once failed "the first hand was never dealt" was not a timing test: it was dealt from the clock's seed, and
+# is pinned now.)
+#
+# Pushes to main are not run here: deploy.yml calls this workflow for them, for exactly the commit it deploys, so that
+# a merge is not tested twice. Caches (Swatinem/rust-cache: the dependencies' build, not the project's own crates) are
+# saved by main's runs only and restored by every other branch's, so that a pull request starts from main's build and
+# the repository's 10 GB of cache holds one copy of each.
+#
+# The toolchain is the pinned nightly of release.yml and deploy.yml (the `node` job checks that the three agree).
+# Actions are pinned to commits, with their versions in the comments.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to test (deploy.yml passes the one it deploys)
+        type: string
+        default: ""
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a branch or pull request cancels the run before it. A run for deploy.yml is grouped by its commit and
+# never cancelled from here.
+concurrency:
+  group: ci-${{ inputs.ref || github.ref }}
+  cancel-in-progress: ${{ !inputs.ref }}
+
+env:
+  RUST_TOOLCHAIN: nightly-2026-10-04
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The client's tests never record a replay or keep a point of view (src/runtime.rs).
+  HOTDOG_NO_RECORD: "1"
+  HOTDOG_NO_POV: "1"
+  # The tests that time a step, a plan or a query against a budget (the simulation's and the client's) have budgets a
+  # developer's machine meets with room to spare; a shared runner is slower and noisier, so each budget is multiplied by
+  # this (kitchen_sim::timing_slack). Unset, the strict budgets apply.
+  HOTDOG_TIMING_SLACK: "3"
+
+jobs:
+  crates:
+    name: sim, ffi, server, launcher
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            crates/kitchen-sim -> ../../target-ci
+            crates/kitchen-ffi -> ../../target-ci
+            crates/server -> ../../target-ci
+            crates/launcher -> ../../target-ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: kitchen-sim
+        run: >-
+          tools/ci/cargo-test-retry.sh forts::blueprint::tests::the_bots_building_costs_little_per_step
+          -- --release --manifest-path crates/kitchen-sim/Cargo.toml
+      - name: kitchen-ffi
+        if: ${{ !cancelled() }}
+        run: cargo test --release --manifest-path crates/kitchen-ffi/Cargo.toml
+      - name: server
+        if: ${{ !cancelled() }}
+        run: cargo test --release --manifest-path crates/server/Cargo.toml
+      - name: launcher
+        if: ${{ !cancelled() }}
+        run: cargo test --release --manifest-path crates/launcher/Cargo.toml
+
+  client:
+    name: client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Libraries to link against
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: The client's tests
+        run: cargo test --release --target x86_64-unknown-linux-gnu
+
+  wasm:
+    name: wasm type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: WebGL 2 build
+        run: cargo check --profile web --target wasm32-unknown-unknown
+      - name: WebGPU build
+        if: ${{ !cancelled() }}
+        run: cargo check --profile web --target wasm32-unknown-unknown --features webgpu
+      # THIRD_PARTY_LICENSES.html (the licence of every crate the packages are made of, which every package and the
+      # browser game carry) is made by tools/build-licenses.sh from the Cargo.lock files; this fails if a dependency or a
+      # licence changed and the committed file did not, or if a crate has a licence about.toml does not accept.
+      # cargo-about is the release binary of 0.9.3, checked against its hash.
+      - name: Third-party licences are current
+        if: ${{ !cancelled() }}
+        env:
+          CARGO_ABOUT_TAR: cargo-about-0.9.3-x86_64-unknown-linux-musl
+          CARGO_ABOUT_SHA256: 3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/about.tar.gz" "https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/$CARGO_ABOUT_TAR.tar.gz"
+          echo "$CARGO_ABOUT_SHA256  $RUNNER_TEMP/about.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/about.tar.gz" -C "$RUNNER_TEMP" "$CARGO_ABOUT_TAR/cargo-about"
+          CARGO_ABOUT="$RUNNER_TEMP/$CARGO_ABOUT_TAR/cargo-about" tools/build-licenses.sh --check
+
+  node:
+    name: node tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: node --test
+        run: >-
+          node --test tools/network/map.test.mjs editor/model.test.mjs tools/touch.test.mjs tools/lobby.test.mjs
+          tools/tune.test.mjs tools/devlink.test.mjs tools/graphics.test.mjs tools/licenses.test.mjs
+      - name: The workflows use one toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          toolchains=$(grep -hE '^ *RUST_TOOLCHAIN: ' .github/workflows/*.yml | tr -d ' ' | sort -u)
+          echo "$toolchains"
+          if [ "$(echo "$toolchains" | wc -l)" -ne 1 ]; then
+            echo "::error::release.yml, ci.yml and deploy.yml name different toolchains (RUST_TOOLCHAIN)"
+            exit 1
+          fi
+
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [crates, client, wasm, node]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every suite passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "crates, client, wasm, node: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::Not every suite passed ($RESULTS)"
+              exit 1
+            fi
+          done

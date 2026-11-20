@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Every package of the game, each built on its own platform's runner with tools/build-all.sh (README.md, "Building and
+# packaging"), uploaded as the run's artifacts: on a pushed tag v*, or by hand (Actions > release > Run workflow).
+# Nothing is published as a release; download the artifacts from the run's page.
+#
+#   linux     ubuntu-22.04    hotdog-simulator-VERSION-linux-x86_64.tar.gz (linked against glibc 2.31 with zig)
+#   windows   windows-2022    hotdog-simulator-VERSION-windows-x86_64.zip (x86_64-pc-windows-msvc, built natively)
+#   mac       macos-14        hotdog-simulator-VERSION-macos-universal.dmg and .zip (arm64 and x86_64, ad-hoc signed)
+#   web       ubuntu-22.04    hotdog-simulator-VERSION-web.zip (the WebGL 2 and WebGPU builds)
+#
+# Every package has the breakfast intro: its people are made in code (src/human/), with no asset to leave out. Artifacts
+# of a public repository can be downloaded by anyone signed in to GitHub.
+#
+# Disk: the packaging scripts stop below MIN_FREE_GB free on the disk they build on (25 by default, a workstation's
+# habit, which a runner has not); the env below sets what a runner's build needs. The Linux and web jobs, on runners whose
+# free disk may be 14 GB, also remove the SDKs preinstalled there (as deploy.yml does).
+#
+# To sign and notarise the Mac app, add the repository secrets MAC_CERTIFICATE_P12 (a Developer ID Application
+# certificate, base64), MAC_CERTIFICATE_PASSWORD, MAC_SIGN_IDENTITY, and for notarisation APPLE_ID, APPLE_TEAM_ID and
+# APPLE_APP_PASSWORD; without them the app is signed ad hoc and Gatekeeper asks before opening it (HOW-TO-RUN.txt).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The toolchain the packages were first built with (README.md, "Building and packaging").
+  RUST_TOOLCHAIN: nightly-2026-10-04
+  CARGO_TERM_COLOR: always
+  DIST: dist
+  # What a package's build needs of the disk: about 4 GB for each target directory it builds in (the earlier local
+  # builds of every package left about 20 GB in five of them: the Linux and Windows packages build two each, for
+  # x86-64-v2 and v3, the Mac app two, one for each architecture, the web package one for both browser builds), with the
+  # toolchain and the dependencies' sources beside: 8 to 10 GB for a package of two. The scripts' 25 GB default would
+  # stop every runner; this stops one that has too little free before it starts, with the free space in the message.
+  MIN_FREE_GB: "10"
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Disk space (the runner's preinstalled SDKs this does not use)
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Libraries to link against
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-gnu
+      - name: zig and cargo-zigbuild (to link against glibc 2.31), in a virtual environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet ziglang==0.17.1 cargo-zigbuild==0.24.1
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+          echo "ZIG=$("$RUNNER_TEMP/zig/bin/python" -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')" >> "$GITHUB_ENV"
+      - run: tools/build-all.sh linux
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-msvc
+      - run: tools/build-all.sh windows
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Signing certificate (when the secrets are set)
+        env:
+          MAC_CERTIFICATE_P12: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+        run: |
+          if [ -z "$MAC_CERTIFICATE_P12" ]; then echo "No certificate: the app is signed ad hoc"; exit 0; fi
+          keychain="$RUNNER_TEMP/signing.keychain-db" password=$(uuidgen)
+          echo "$MAC_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MAC_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          # (The keychains already on the list, one a line, quotes and indentation removed: kept as the words they are.)
+          listed=()
+          while IFS= read -r line; do
+            line=${line//\"/}
+            line=${line#"${line%%[![:space:]]*}"}
+            [ -n "$line" ] && listed+=("$line")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$keychain" ${listed[@]+"${listed[@]}"}
+          echo "MAC_SIGN_IDENTITY=$MAC_SIGN_IDENTITY" >> "$GITHUB_ENV"
+          if [ -n "$APPLE_ID" ]; then
+            xcrun notarytool store-credentials hotdog-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --keychain "$keychain"
+            echo "MAC_NOTARY_PROFILE=hotdog-notary" >> "$GITHUB_ENV"
+          fi
+      - run: tools/build-all.sh mac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-universal
+          path: dist/
+          if-no-files-found: error
+
+  web:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Disk space (the runner's preinstalled SDKs this does not use)
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h .
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: wasm-bindgen (the version Cargo.lock pins) and wasm-opt (binaryen)
+        run: |
+          version=$(awk '$0 == "name = \"wasm-bindgen\"" {getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      # (From the system's packages: tools/build-web.sh runs `python3 -I`, which looks in the system's site-packages
+      # and not in the user's, where `pip3 install pillow` puts it. A fresh checkout has no file older than another, so
+      # the build may well find a PNG "newer" than its WebP and need it.)
+      - name: Pillow (for the WebP food textures, when a PNG is newer)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil
+      - run: tools/build-all.sh web
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web
+          path: dist/
+          if-no-files-found: error

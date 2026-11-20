@@ -1,0 +1,57 @@
+[package]
+name = "hotdog-simulator"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["David Nunes-Childs"]
+# TODO(owner): confirm that this is the public repository's address before the project goes public. It is the one place the
+# project says where its source code is: the Esc menu (src/menu.rs), HOW-TO-RUN.txt, THIRD_PARTY_LICENSES.html
+# (tools/build-licenses.sh: run it again after changing this line, CI checks it) and the macOS bundle id (tools/build-mac.sh)
+# all read it. HOTDOG_SOURCE_URL in the environment takes its place for a build.
+repository = "https://github.com/chouithegewy/hotdog-simulator"
+
+[features]
+counter-map = []
+# Browser builds use WebGL 2 unless this is on; Bevy's webgpu feature overrides webgl2. Native builds ignore both.
+webgpu = ["bevy/webgpu", "bevy/pbr_anisotropy_texture"]
+# The native Ultra tier (README, "Ultra tier (native)"; src/ultra.rs): Bevy's experimental raytraced lighting
+# (bevy_solari) and virtual geometry (meshlets), switched on at run time by --ultra, --raytraced or --meshlets.
+# Native only: never part of a browser build. `wgpu` is Bevy's own (the same version), to check the GPU first.
+ultra = ["bevy/bevy_solari", "bevy/meshlet", "bevy/meshlet_processor", "dep:wgpu"]
+
+[dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["3d", "ui", "bevy_winit", "default_font", "webgl2", "x11", "bevy_audio", "wav"] }
+wasm-bindgen = "=0.2.128"
+kitchen-sim = { path = "crates/kitchen-sim" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The browser builds load the food textures as WebP (src/hotdog.rs).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["webp"] }
+
+# Native builds get the same optional material features as the WebGPU browser build. The WebGL 2 build
+# goes without them: each one costs a texture binding, and WebGL 2 guarantees only sixteen.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["pbr_anisotropy_texture"] }
+# The native client's multiplayer: the server's WebSocket (a browser uses the page's own).
+tungstenite = "0.30"
+# Only with the `ultra` feature: Bevy's wgpu, to ask the GPU what it can do before the renderer starts.
+wgpu = { version = "29.0.4", default-features = false, optional = true }
+
+# wgpu-hal with one change (vendor/wgpu-hal/Cargo.toml says which): its WebGL 2 queue skips texture, sampler and
+# vertex-attribute calls that set what is already set, over half of a frame's GL calls in the browser.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# The browser builds (tools/build-web.sh): one optimised whole, for a smaller download. Native builds keep release,
+# which compiles much faster.
+[profile.web]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1

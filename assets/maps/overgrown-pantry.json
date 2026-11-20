@@ -1,0 +1,64 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Overgrown Pantry",
+  "theme": "jungle",
+  "mode": "siege",
+  "bounds": [-2.4, 2.1, 2.4, 3.63],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [-1.6, 2.35], "yaw": 0},
+    {"p": [-0.8, 2.3], "yaw": 0},
+    {"p": [0, 2.3], "yaw": 0},
+    {"p": [0.8, 2.3], "yaw": 0},
+    {"p": [1.6, 2.35], "yaw": 0}
+  ],
+  "spawns": [
+    {"p": [-0.35, 3.15]},
+    {"p": [-0.12, 3.15]},
+    {"p": [0.12, 3.15]},
+    {"p": [0.35, 3.15]}
+  ],
+  "pickups": [
+    {"p": [-2.2, 2.3], "weapon": 1, "ammo": 12},
+    {"p": [2.2, 2.3], "weapon": 1, "ammo": 12},
+    {"p": [-1.2, 2.85], "weapon": 3, "ammo": 90},
+    {"p": [1.2, 2.85], "weapon": 2, "ammo": 6},
+    {"p": [-2.05, 3.35], "weapon": 4, "ammo": 4},
+    {"p": [2.05, 3.35], "weapon": 5, "ammo": 40},
+    {"p": [-0.78, 2.86], "weapon": 0},
+    {"p": [0.78, 2.86], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-0.25, 3.27, 0.25, 3.6], "height": 0.25, "style": "microwave", "facing": "-z"},
+    {"rect": [1.51, 2.87, 1.79, 3.06], "height": 0.29, "style": "stone"},
+    {"rect": [-1.79, 2.87, -1.51, 3.06], "height": 0.29, "style": "stone"},
+    {"rect": [1.4, 2.59, 1.7, 2.73], "height": 0.23, "style": "stone"},
+    {"rect": [-1.7, 2.59, -1.4, 2.73], "height": 0.23, "style": "stone"},
+    {"rect": [0.12, 2.53, 0.32, 2.7], "height": 0.25, "style": "wood"},
+    {"rect": [-0.32, 2.53, -0.12, 2.7], "height": 0.25, "style": "wood"},
+    {"rect": [1.82, 2.54, 1.98, 2.72], "height": 0.27, "style": "wood"},
+    {"rect": [-1.98, 2.54, -1.82, 2.72], "height": 0.27, "style": "wood"}
+  ],
+  "decks": [
+    {"rect": [-2.35, 3.15, -1.8, 3.6], "height": 0.24, "style": "wood"},
+    {"rect": [1.8, 3.15, 2.35, 3.6], "height": 0.24, "style": "green"}
+  ],
+  "ramps": [
+    {"rect": [-1.8, 3.15, -1.4, 3.6], "base": 0, "height": 0.24, "rise": "-x"},
+    {"rect": [1.4, 3.15, 1.8, 3.6], "base": 0, "height": 0.24, "rise": "+x"}
+  ],
+  "props": [
+    {"kind": "turret", "p": [-2.1, 3.38], "base": 0.26, "yaw": -1.57},
+    {"kind": "turret", "p": [2.1, 3.38], "base": 0.26, "yaw": 1.57},
+    {"kind": "pillow", "p": [-1.3, 3.4], "base": 0, "yaw": 0.4},
+    {"kind": "pillow", "p": [1.3, 3.4], "base": 0, "yaw": -0.4},
+    {"kind": "napkin", "p": [-0.85, 3.38], "base": 0, "yaw": 0},
+    {"kind": "napkin", "p": [0.85, 3.38], "base": 0, "yaw": 0},
+    {"kind": "chair", "p": [-0.6, 2.6], "base": 0, "yaw": 1.2},
+    {"kind": "chair", "p": [0.6, 2.6], "base": 0, "yaw": -1.2},
+    {"kind": "crate", "p": [-2.25, 2.75], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [2.25, 2.75], "base": 0, "yaw": 0}
+  ],
+  "zones": []
+}

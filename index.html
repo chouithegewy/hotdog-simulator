@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Hotdog Simulator</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020304;color:#f4f1df;font-family:system-ui,sans-serif}#game{width:100%;height:100%;display:block}.fps{position:absolute;right:20px;bottom:18px;pointer-events:none;color:#d9ddce;font:10px ui-monospace,monospace;letter-spacing:.12em;text-shadow:0 1px 3px #000}.error{position:absolute;inset:0;z-index:10;display:none;place-items:center;background:#101515;color:#f1c2ae;padding:28px;text-align:center;line-height:1.6}
+.chapter{position:absolute;top:14px;left:14px;padding:10px 16px 12px 14px;pointer-events:none;text-shadow:0 2px 8px #000;background:#0d1b1bb8;border-radius:9px;backdrop-filter:blur(6px)}.eyebrow{margin:0;color:#b6d6cb;font:10px ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase}.chapter h1{font-size:18px;font-weight:550;margin:7px 0}.chapter .step{font:11px ui-monospace,monospace;color:#dfd7bc}.mission{position:absolute;left:28px;bottom:28px;width:min(360px,calc(100vw - 56px));padding:19px 21px;background:#0d1b1be8;border:1px solid #9fc6b333;border-radius:9px;box-shadow:0 8px 30px #0004;backdrop-filter:blur(8px)}.mission h2{font-size:16px;margin:8px 0 7px;font-weight:550}.mission .line{font-size:13px;line-height:1.55;color:#d5d6c9;margin:0 0 15px}.mission button{width:100%;min-height:43px;border:0;border-radius:5px;background:#dfb97b;color:#172321;font:600 12px system-ui,sans-serif;cursor:pointer}.mission button:hover:enabled{background:#efcd98}.mission button:focus-visible{outline:3px solid #fff;outline-offset:4px}.mission button:disabled{background:#263b36;color:#bacbc1;cursor:default}.hint{font:10px ui-monospace,monospace;color:#9eafa5;margin:10px 0 0;text-align:center}@media(max-height:520px){.chapter{top:6px;left:6px}.mission{left:18px;bottom:18px;padding:12px 16px;width:300px}.mission .line{margin-bottom:9px}.hint{display:none}}@media(max-width:540px){.chapter{top:8px;left:8px}.mission{left:20px;bottom:35px;width:calc(100vw - 40px)}.fps{bottom:12px}}
+.modes{position:absolute;right:22px;bottom:42px;display:flex;gap:12px;font:12px system-ui,sans-serif}.modes a{color:#e6cf95;text-decoration:none;padding:7px 11px;background:#0a161bd9;border:1px solid #849ca244;border-radius:4px}.modes a:hover{background:#284344}.modes a.legal{padding:7px 9px;color:#9eafa5;font-size:11px;background:#0a161b99;border-color:#849ca222}.modes a.legal:hover{color:#e6cf95}</style>
+<style>/* Graphics (src/quality.rs): the canvas is drawn --render-scale of the page's size and magnified back, so the game renders fewer pixels than the screen has. */
+#game{width:calc(100% * var(--render-scale,1))!important;height:calc(100% * var(--render-scale,1))!important;transform:scale(calc(1 / var(--render-scale,1)));transform-origin:0 0}</style>
+<style>/* The frame-rate line (#readout): the frame rate (#fps, which the game writes too), then the renderer, the quality and the
+   resolution, each of which opens a small menu (lobby.js, graphics) while the line takes clicks (.gfx-live: not during a round
+   online). Each part's tap target reaches past its small text, to 32 px and more. The line keeps to one row: where it is too long
+   (the game writes its frame times and counts into #fps) the frame rate gives way, never the graphics. */
+.fps{display:flex;align-items:baseline;justify-content:flex-end;max-width:calc(100vw - 40px)}
+.fps #fps{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gfx-parts{flex:none;white-space:nowrap}.gfx-dot{white-space:pre}
+.fps.gfx-live{z-index:4}
+.gfx-part{position:relative;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-shadow:inherit;pointer-events:none;cursor:default}
+.fps.gfx-live .gfx-part{pointer-events:auto;cursor:pointer;text-decoration:underline dotted #d9ddce88;text-underline-offset:3px}
+.fps.gfx-live .gfx-part::before{content:'';position:absolute;inset:-11px -6px}
+.fps.gfx-live .gfx-part:hover,.gfx-part[aria-expanded=true]{color:#f6dfb2;text-decoration-color:#dfb97b}
+.fps.gfx-live .gfx-part.locked{cursor:help;text-decoration-style:solid;text-decoration-color:#d9ddce44}
+.gfx-part:focus-visible{outline:2px solid #dfb97b;outline-offset:3px;border-radius:2px}
+html.touch-on .fps.gfx-live .gfx-part::before{inset:-12px -8px}
+/* With the touch controls' menu open the line takes taps wherever it is, whole and in full; centred at the top in a round, its frame
+   rate keeps one width (the game's longer text is cut short), so that the parts do not slide about under a finger. */
+html.touch-menu-open .fps.gfx-live{z-index:7;opacity:1;overflow:visible}html.touch-menu-open .fps.gfx-live #fps{flex:none;width:8.6ch}
+.gfx-pop{position:fixed;z-index:8;width:max-content;min-width:176px;max-width:min(300px,calc(100vw - 16px));overflow:auto;padding:8px 6px 6px;background:#0d1b1bf2;border:1px solid #9fc6b344;border-radius:8px;box-shadow:0 10px 30px #000a;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#f4f1df;font:11px ui-monospace,monospace;letter-spacing:.06em;overscroll-behavior:contain}
+.gfx-pop[hidden],.gfx-note[hidden]{display:none}
+.gfx-head{margin:0 8px;color:#b6d6cb;font-size:10px;letter-spacing:.18em;text-transform:uppercase}
+.gfx-hint{margin:3px 8px 7px;font:11px/1.4 system-ui,sans-serif;letter-spacing:0;color:#9eafa5}
+.gfx-items{display:grid;gap:2px}
+.gfx-item{display:flex;align-items:center;gap:9px;width:100%;min-height:32px;margin:0;padding:0 10px 0 9px;border:0;border-radius:5px;background:transparent;color:#f4f1df;font:inherit;letter-spacing:inherit;text-align:left;cursor:pointer;touch-action:manipulation}
+.gfx-item::before{content:'';flex:none;width:7px;height:7px;border-radius:50%;box-shadow:inset 0 0 0 1px #9fc6b377}
+.gfx-item[aria-checked=true]{background:#285a4888}
+.gfx-item[aria-checked=true]::before{background:#dfb97b;box-shadow:0 0 0 2px #dfb97b44}
+.gfx-item:hover:not([aria-disabled]),.gfx-item:focus-visible{background:#1d3f3a}.gfx-item[aria-checked=true]:hover{background:#285a48}
+.gfx-item:focus{outline:none}.gfx-item:focus-visible{outline:2px solid #dfb97b;outline-offset:-2px}
+.gfx-item[aria-disabled]{color:#8b9892;cursor:not-allowed}.gfx-item[aria-disabled]::before{box-shadow:inset 0 0 0 1px #8b989255}
+.gfx-item small{margin-left:auto;padding-left:14px;font-size:10px;letter-spacing:.04em;color:#9eafa5}
+.gfx-item[aria-disabled] small{color:#e0a996}
+.gfx-note{margin:7px 8px 2px;font:11px/1.45 system-ui,sans-serif;letter-spacing:0;color:#f1c2ae}
+html.touch-on .gfx-item{min-height:40px}</style>
+<style>/* The loading screen: the build's download, then the game starting and fetching its files. */
+.loading{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:min(340px,calc(100vw - 32px));padding:15px 19px 17px;background:#0d1b1be8;border:1px solid #9fc6b333;border-radius:9px;box-shadow:0 8px 30px #0004;z-index:4;pointer-events:none}.loading[hidden]{display:none}.loading .note{margin:8px 0 11px;font:12px ui-monospace,monospace;color:#d5d6c9;font-variant-numeric:tabular-nums}.loading .bar{height:6px;border-radius:3px;background:#263b36;overflow:hidden}.loading .bar i{display:block;height:100%;width:0;background:#dfb97b;transition:width .25s}.loading.busy .bar i{width:30%;transition:none;animation:loading 1.3s ease-in-out infinite}@keyframes loading{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@media(prefers-reduced-motion:reduce){.loading.busy .bar i{animation:none;width:100%;opacity:.45}}</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="chapter" hidden><p class="eyebrow">Hotdog simulator</p><h1>Maya's breakfast shift</h1><span id="step" class="step">01 / 03 &nbsp; Meet the chef</span></div>
+<aside class="mission" aria-label="Breakfast mission" hidden><p id="speaker" class="eyebrow">Maya · breakfast chef</p><div role="status" aria-live="polite"><h2 id="mission-title">The morning shift</h2><p id="mission-line" class="line">Maya is here to bring all six hotdogs to the prep station.</p></div><button id="action" disabled>Loading the kitchen…</button><p class="hint">SPACE to call Maya · R to restart</p></aside>
+<nav class="modes" aria-label="Game mode"><a href="?play">Play</a><a href="?demo">Five-player demo</a><a class="legal" href="THIRD_PARTY_LICENSES.html" target="_blank" rel="noopener" title="GPL-3.0-only: the licences of the game and of everything in it, and where its source is">Licences and source</a></nav>
+<div id="readout" class="fps" role="group" aria-label="Frame rate and graphics"><span id="fps">-- FPS</span></div><div id="error" class="error"></div>
+<div id="loading" class="loading" role="progressbar" aria-label="Loading the game"><p class="eyebrow">Hotdog simulator</p><p class="note">Loading…</p><div class="bar"><i></i></div></div>
+<script type="module">
+let stage=0;window.hotdogAction=0;
+const stages=[
+ ['01 / 03 · Meet the chef','The morning shift','Maya is here to bring all six hotdogs to the prep station.','Opening the fridge…',true],
+ ['01 / 03 · Get her attention','You’re awake. They’re hungry.','The other five are smiling in their sleep. You’re the only one who knows what’s for breakfast.','Squeak for Maya  [SPACE]',false],
+ ['02 / 03 · Leave the fridge','She heard you','“All six of you? Got it. Let me get a good grip.”','Maya is reaching in…',true],
+ ['02 / 03 · Leave the fridge','A change of scenery','Maya turns with your tray and walks to the kitchen counter behind her.','On the move…',true],
+ ['03 / 03 · Reach the kitchen counter','Easy does it','Maya sets the tray on the cutting board on the back counter. All six hotdogs stay together.','Setting you down…',true],
+ ['03 / 03 · Breakfast delivery complete','All six accounted for','“Right. Buns are ready, the crew’s hungry. Let’s make breakfast.”','Opening the package…',true],
+ ['01 / 03 · The morning hello','They’re celebrating breakfast.','“They’re smiling. They’re hungry. I’m breakfast.”','A very happy couple…',true],
+ ['04 / 04 · The knife','She reaches for the knife','Stay still. She is cutting the package, right?','Hold your breath…',true],
+ ['04 / 04 · The escape','The seal is opening','The counter is your only way out. The microwave is ticking.','Almost free…',true]
+];
+window.addEventListener('hotdog:stage',event=>{
+ const next=Number(event.detail);if(!Number.isInteger(next)||next<0)return;
+ stage=next;document.body.dataset.stage=String(stage);
+ const cinematic=stages[stage];
+ document.querySelector('.chapter').hidden=!cinematic;
+ document.querySelector('.mission').hidden=!cinematic;
+ if(!cinematic)return;
+ document.querySelector('#speaker').textContent=stage===1||stage>=6?'YOU · THE SELF-AWARE HOTDOG':'MAYA · BREAKFAST CHEF';
+ const [step,title,line,action,disabled]=cinematic;
+ document.querySelector('#step').textContent=step;document.querySelector('#mission-title').textContent=title;document.querySelector('#mission-line').textContent=line;
+ const button=document.querySelector('#action');button.textContent=action;button.disabled=disabled;
+ document.querySelector('.hint').textContent=stage<7?'SPACE to call Maya · R to restart':'Combat begins when the package opens';
+});
+document.querySelector('#action').addEventListener('click',()=>{if(stage===1)window.hotdogAction=1;});
+window.addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat&&stage===1)window.hotdogAction=1;}if(event.code==='KeyR'&&!event.repeat&&stage<7)window.hotdogAction=2;});
+document.querySelector('#game').addEventListener('contextmenu',event=>event.preventDefault());
+// Ctrl is crouch, and Ctrl with the wheel zooms the page: the wheel changes guns (src/arena.rs), so the page leaves its zoom alone. (Not stopped: the game still hears it.)
+document.querySelector('#game').addEventListener('wheel',event=>{if(event.ctrlKey)event.preventDefault()},{passive:false});
+const fps=document.querySelector('#fps');let frames=0,stamp=performance.now();function tick(t){frames++;if(t-stamp>500){fps.textContent=Math.round(frames*1000/(t-stamp))+' FPS';frames=0;stamp=t}requestAnimationFrame(tick)}requestAnimationFrame(tick);
+const build='hotdog-condiments-20261111';
+// The loading screen: the build's download as it arrives, then the game starting and the files it fetches (textures, sounds,
+// shaders: its fetches under assets/ are counted), until it has drawn and has them all.
+const loading=(()=>{const box=document.querySelector('#loading'),note=box.querySelector('.note'),fill=box.querySelector('.bar i'),fetch0=window.fetch.bind(window);
+ let done=false,asked=0,arrived=0;const mb=n=>(n/1e6).toFixed(1);
+ const show=(text,part)=>{if(done)return;note.textContent=text;box.classList.toggle('busy',part==null);fill.style.width=part==null?'':`${Math.round(Math.min(1,part)*100)}%`;if(part==null)box.removeAttribute('aria-valuenow');else box.setAttribute('aria-valuenow',String(Math.round(part*100)))};
+ const hide=()=>{done=true;box.hidden=true};
+ window.fetch=(...a)=>{const p=fetch0(...a);if(!done&&/(^|\/)assets\//.test(String(a[0]?.url??a[0]))){asked++;p.catch(()=>{}).finally(()=>arrived++)}return p};
+ // (Once the game draws, a file that never arrives keeps the screen up for 15 s at most.)
+ let drawn=0;const watch=()=>{if(done)return;if(window.hotdogMetrics){drawn||=performance.now();if(arrived>=asked||performance.now()-drawn>15000)return hide()}
+  if(asked)show(`Loading the kitchen · ${arrived} of ${asked} files`,arrived/asked);setTimeout(watch,150)};
+ // The build itself: its response goes to WebAssembly.instantiateStreaming untouched (so Chrome can keep its compiled code), and a
+ // copy of it is counted. The server says how long it is unpacked when it sends it packed (x-decoded-length).
+ const fetchBuild=url=>fetch0(url).then(response=>{if(!response.ok)throw new Error(`${url}: HTTP ${response.status}`);
+  const total=Number(response.headers.get('x-decoded-length')||(response.headers.get('content-encoding')?0:response.headers.get('content-length')))||0;
+  if(response.body)(async()=>{const reader=response.clone().body.getReader();let got=0;
+   for(;;){const {done,value}=await reader.read();if(done)break;got+=value.byteLength;show(total?`Downloading the game · ${mb(got)} of ${mb(total)} MB`:`Downloading the game · ${mb(got)} MB`,total?got/total:null)}
+   if(!asked)show('Starting the kitchen…',null)})().catch(()=>{});
+  return response});
+ return{fetchBuild,watch,hide}})();
+// Two builds of the same game: pkg-webgpu for browsers with a working WebGPU adapter, pkg (WebGL 2) for the rest. The renderer
+// menu on the frame-rate line (lobby.js, graphics) chooses Auto, WebGPU or WebGL 2, and the page remembers; ?webgl2 or ?webgpu
+// in the address forces one. The build's module is fetched alongside its script, not after it.
+const query=new URLSearchParams(location.search),load=dir=>{const wasm=loading.fetchBuild(`./${dir}/hotdog_simulator_bg.wasm?v=${build}`);wasm.catch(()=>{});loading.watch();
+ return import(`./${dir}/hotdog_simulator.js?v=${build}`).then(m=>m.default({module_or_path:wasm}))};
+// A map can arrive three ways: handed over by the editor's Play button after #map= in the address, named with
+// ?map=file-name (a file in assets/maps), or sent by the editor while it is open so edits show up as they are made.
+// The game reads window.hotdogMap when it starts and watches window.hotdogMapVersion for changes.
+const handed=new URLSearchParams(location.hash.slice(1)).get('map'),named=query.get('map');
+if(handed)window.hotdogMap=handed;
+else if(named&&/^[\w-]+$/.test(named))window.hotdogMap=await fetch(`assets/maps/${named}.json`).then(r=>r.ok?r.text():null).catch(()=>null);
+else if(!named&&query.get('mode')==='forts'&&!query.has('mp')&&!query.get('server'))window.hotdogMap=await fetch('assets/maps/pillow-fort.json').then(r=>r.ok?r.text():null).catch(()=>null); // offline Forts with no map named: Pillow Fort
+window.hotdogMapVersion=0;
+window.addEventListener('message',event=>{if(event.data?.type==='hotdog-map'&&typeof event.data.text==='string'&&event.data.text.length<4e6){window.hotdogMap=event.data.text;window.hotdogMapVersion++}});
+// Touch controls (touch.js, src/touch.rs) on a device with a touch screen, or with ?touch in the address (?touch=0: never).
+if(query.has('touch')?query.get('touch')!=='0':navigator.maxTouchPoints>0||matchMedia('(any-pointer:coarse)').matches){const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href=`touch.css?v=${build}`;document.head.append(sheet);
+ import(`./touch.js?v=${build}`).then(module=>module.start()).catch(error=>console.error('The touch controls could not be loaded',error))}
+// The sandbox's badge and tuning panel (tune.js) with ?sandbox in the address.
+if(query.has('sandbox')){const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href=`tune.css?v=${build}`;document.head.append(sheet);import(`./tune.js?v=${build}`).then(module=>module.start()).catch(error=>console.error('The sandbox panel could not be loaded',error))}
+// Multiplayer: the lobby (the header, names, colours, the ready queue, chat and voice) is the page's own; see lobby.js.
+// The server address is worked out as the game does it (src/runtime.rs): ?server=…, or with ?mp the game socket of the server that served this page
+// (one port for the page, the game and the lobby: ws://HOST:PORT/ws), wss when the page is https.
+// The same module has the graphics menus on the frame-rate line, which every page has, so it is loaded on every page.
+const online=query.get('server')||(query.has('mp')?`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`:'');
+const page=await import(`./lobby.js?v=${build}`).catch(error=>{console.error('lobby.js could not be loaded',error);return null});
+if(online&&page){const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href=`lobby.css?v=${build}`;document.head.append(sheet);
+ try{page.start(online)}catch(error){console.error('The lobby could not be loaded',error)}}
+// The build: the address's, else the renderer chosen (Auto when none was), where the browser can have it.
+let rendererChoice='';try{rendererChoice=localStorage.getItem('hotdog-renderer')||''}catch{}
+// A WebGPU build that failed to start here lately (below) sends Auto to WebGL 2 for a week; a WebGPU the player chose, or in the address, is tried.
+let failedAt='';try{failedAt=localStorage.getItem('hotdog-webgpu-failed')||''}catch{}
+const renderer=page?.plan(location.search,rendererChoice,!!navigator.gpu,page.webgpuFailed(failedAt,Date.now()))??{forced:query.has('webgpu')?'webgpu':query.has('webgl2')?'webgl2':null,probe:!query.has('webgpu')&&!query.has('webgl2')&&!!navigator.gpu};
+let webgpu=renderer.forced==='webgpu',adapter=null;
+// Browsers only offer WebGPU to pages on https:// or localhost. Say so instead of letting a forced WebGPU build crash.
+if(webgpu&&!navigator.gpu){
+ const el=document.querySelector('#error');el.style.display='grid';
+ el.textContent=window.isSecureContext?'This browser has no WebGPU. Remove webgpu from the address to play with WebGL 2.':'WebGPU is only available to pages opened over https:// or from localhost, and this page was opened over plain http from another machine. Remove webgpu from the address to play with WebGL 2, or open the game through https or an SSH tunnel to localhost to use WebGPU.';
+ throw new Error('WebGPU is not available on this page');
+}
+if(renderer.probe){try{adapter=!!(await navigator.gpu.requestAdapter())}catch{adapter=false}webgpu=adapter}
+document.documentElement.dataset.renderer=webgpu?'webgpu':'webgl2';
+// The frame-rate line shows which build is running.
+document.querySelector('#fps').dataset.renderer=webgpu?'WebGPU':'WebGL 2';
+const remember=()=>{try{localStorage.setItem('hotdog-webgpu-failed',String(Date.now()));return localStorage.getItem('hotdog-webgpu-failed')!==null}catch{return false}};
+if(webgpu&&renderer.forced!=='webgpu'){
+ // If the WebGPU build dies while starting, come back on WebGL 2, once: the failure is remembered (lobby.js webgpuFailed), so Auto does
+ // not try again for a week. A WebGPU the player chose, or a browser that kept nothing, reloads with ?webgl2 in the address, which cannot loop.
+ // winit throws one harmless exception by design.
+ const retreat=event=>{const text=String(event.message??event.reason?.message??event.reason??'');if(text.includes('exceptions for control flow'))return;
+  if(!remember()||!page||renderer.choice!=='auto')query.set('webgl2','');
+  location.replace(location.pathname+'?'+query.toString().replace(/=(&|$)/g,'$1')+location.hash)};
+ window.addEventListener('error',retreat);window.addEventListener('unhandledrejection',retreat);
+ // A lost GPU device is no exception: Bevy logs it with console.error and quits, so that is watched for as well.
+ const logged=console.error;console.error=(...args)=>{logged.apply(console,args);if(args.some(a=>/DeviceLost/.test(String(a))))retreat({message:'DeviceLost'})};
+ setTimeout(()=>{window.removeEventListener('error',retreat);window.removeEventListener('unhandledrejection',retreat);console.error=logged},20000);
+}
+// Graphics (src/quality.rs). What the automatic quality starts from: the GPU's name as WebGL and WebGPU give it, the memory and
+// processor hints and whether this is a phone.
+window.hotdogDevice=await (async()=>{
+ const ua=navigator.userAgent,d={memory:navigator.deviceMemory||0,cores:navigator.hardwareConcurrency||0,mobile:!!(navigator.userAgentData?.mobile||/Android|iPhone|iPad|iPod|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1))};
+ try{const gl=document.createElement('canvas').getContext('webgl2'),x=gl?.getExtension('WEBGL_debug_renderer_info');
+  if(gl){d.renderer=String(gl.getParameter(x?x.UNMASKED_RENDERER_WEBGL:gl.RENDERER));d.vendor=String(gl.getParameter(x?x.UNMASKED_VENDOR_WEBGL:gl.VENDOR));gl.getExtension('WEBGL_lose_context')?.loseContext()}}catch{}
+ if(webgpu)try{const i=(await navigator.gpu.requestAdapter())?.info;if(i)Object.assign(d,{gpuVendor:i.vendor,gpuArchitecture:i.architecture,gpuDescription:i.description})}catch{}
+ return d})();
+// The graphics menus on the frame-rate line: the renderer, the quality (Auto, High, Medium, Low, Lowest) and the resolution (Auto, or
+// 100% to 50%), each remembered; ?webgl2 or ?webgpu, ?quality= and ?scale= in the address win over them.
+try{page?.graphics({secure:window.isSecureContext,gpu:!!navigator.gpu,adapter})}catch(error){console.error('The graphics menus could not be made',error)}
+load(webgpu?'pkg-webgpu':'pkg').catch(error=>{if(!webgpu||renderer.forced==='webgpu')throw error;console.warn('No WebGPU build to load; using WebGL 2.',error);if(!/HTTP \d+|Failed to fetch|dynamically imported/i.test(String(error?.message??error)))remember();document.documentElement.dataset.renderer='webgl2';document.querySelector('#fps').dataset.renderer='WebGL 2';return load('pkg')}).catch(e=>{console.error(e);loading.hide();const el=document.querySelector('#error');el.style.display='grid';
+ // A build made for WebAssembly's SIMD (tools/build-web.sh, SIMD=1) cannot be compiled by a browser without it: say so (the probe is a module of one SIMD instruction).
+ let simd=true;try{simd=WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]))}catch{}
+ el.textContent=!simd&&e instanceof WebAssembly.CompileError?'This browser cannot run WebAssembly SIMD, which this build of the game needs. Update it (Chrome or Edge 91, Firefox 89, Safari 16.4 or later), or play a build made without SIMD (tools/build-web.sh with SIMD=0).':'Could not load the WebAssembly build. Run the build commands in README.md, then refresh.'});
+</script>
+</body>
+</html>

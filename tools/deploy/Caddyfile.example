@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Caddy in front of hotdog-server (README.md, "Continuous integration and deployment"): HTTPS for
+# hotdog-simulator.chilos.dev, with a certificate Caddy obtains and renews by itself (Let's Encrypt, or ZeroSSL), HTTP
+# redirected to HTTPS, and everything passed on to the server on 127.0.0.1:8150: the page and both builds, the assets,
+# the map editor, /status, /replays, and the WebSockets at /ws and /lobby (reverse_proxy upgrades them by itself and
+# keeps them open for as long as they last; it sets no time limit on them).
+#
+# Install Caddy 2.7 or later (https://caddyserver.com/docs/install: the Debian and Ubuntu package runs it as a system
+# service), put this site block in /etc/caddy/Caddyfile, then
+#   sudo systemctl reload caddy
+# Ports 80 and 443 (TCP, and UDP 443 for HTTP/3) must be open to the internet: the certificate is obtained over them,
+# for the name the DNS A record points here.
+#
+# What the game needs here, and why nothing more:
+# - Compression: the server sends the builds' module and script already compressed (brotli or gzip, whichever the
+#   browser takes, from the .br and .gz copies tools/build-web.sh writes), with Content-Encoding set. Caddy's `encode`
+#   leaves such a response as it is, so they are never compressed twice; it compresses only what comes plain (the page,
+#   the other scripts, the maps, the status: a few hundred KB in all).
+# - Content types: the server's own (application/wasm for the modules, which browsers need to compile one as it
+#   downloads). Caddy passes them on.
+# - Caching: the bundle's file names carry no hash (pkg/hotdog_simulator_bg.wasm is the same name in every release),
+#   so the server sends every file with `Cache-Control: no-cache` and an ETag: a browser asks again each time and is
+#   told 304 while its copy is current, and a deploy is picked up at the next load. Add no cache here.
+# - No cross-origin isolation (COOP/COEP): the game uses no SharedArrayBuffer or WebAssembly threads.
+hotdog-simulator.chilos.dev {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8150 {
+		# A `caddy reload` closes open WebSockets (games in progress) at once by default; give them ten minutes.
+		stream_close_delay 10m
+	}
+
+	header {
+		# Browsers keep to HTTPS for this name for a year (WebGPU needs a secure page anyway).
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log
+}

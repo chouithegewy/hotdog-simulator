@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Hotdog Simulator's public server (README.md, "Continuous integration and deployment"): the release that
+# DEPLOY_PATH/current points at (tools/deploy/deploy.sh), listening on 127.0.0.1:8150 only, behind the HTTPS proxy
+# (Caddyfile.example, nginx.conf.example) that serves https://hotdog-simulator.chilos.dev. One process serves the page,
+# both browser builds, the assets, the map editor, /status, /replays and the game's WebSockets (/ws, /lobby); it records
+# every match into DEPLOY_PATH/replays, outside the releases, which no deploy touches. No --dev: the sandbox and its
+# tuning stay off.
+#
+# As written: a user service (systemctl --user, kept running by lingering) with DEPLOY_PATH ~/hotdog-simulator.
+# tools/deploy/remote-setup.sh installs it with the deploy path filled in, or as a system service run by the same
+# unprivileged user (--system: the `#system:` lines below are turned on, and %h/hotdog-simulator becomes the path).
+#
+#   systemctl --user status hotdog-simulator      its state
+#   journalctl --user -u hotdog-simulator -f      its log (as a system service: without --user, as root or in adm)
+
+[Unit]
+Description=Hotdog Simulator (the public server, 127.0.0.1:8150)
+Wants=network-online.target
+After=network-online.target
+# Nothing to start before the first deploy.
+ConditionPathExists=%h/hotdog-simulator/current
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+#system: User=@USER@
+#system: Group=@GROUP@
+# The release's own folder, resolved when the service starts: the process serves that release (its web/) until it is
+# restarted, whatever current is pointed at meanwhile (deploy.sh points it, then restarts).
+WorkingDirectory=%h/hotdog-simulator/current
+ExecStart=%h/hotdog-simulator/current/server/hotdog-server --host 127.0.0.1 --port 8150 --root web --replays %h/hotdog-simulator/replays
+Restart=on-failure
+RestartSec=2
+# The server ends on SIGTERM at once (crates/server/src/main.rs).
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hotdog-simulator
+UMask=0027
+
+# Hardening. These hold in a user service too (seccomp, no new privileges):
+NoNewPrivileges=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# The file system read-only but for the replays. A user service gets these only where unprivileged user namespaces
+# are allowed; where they are not (Ubuntu 24.04 and later restrict them with AppArmor) systemd quietly does without
+# them, and the service still runs. A system service (remote-setup.sh --system) always has them.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/hotdog-simulator/replays
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# Only a system service can drop these capabilities (a user service would fail to start with them: 218/CAPABILITIES).
+#system: CapabilityBoundingSet=
+#system: AmbientCapabilities=
+#system: PrivateDevices=yes
+#system: ProtectKernelModules=yes
+#system: ProtectKernelLogs=yes
+#system: ProtectClock=yes
+#system: ProtectHostname=yes
+#system: ProtectProc=invisible
+
+[Install]
+WantedBy=default.target

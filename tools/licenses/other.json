@@ -1,0 +1,106 @@
+{
+  "intro": "Besides the Rust crates of section 3, these are in the packages and the browser game and are not the project's own work. They are written by hand, from the audit of what ships (THIRD_PARTY_NOTICES.md has the project's own notes on them); the texts beside them are the licences' own. Where a licence needs only a notice, the notice is here.",
+  "items": [
+    {
+      "id": "fira-mono",
+      "title": "Fira Mono: the game's text font",
+      "paragraphs": [
+        "Every word the game draws on screen is set in Fira Mono (a subset of it, Medium), which Bevy's {crate:bevy_text} crate embeds and the game compiles in through Bevy's default_font feature, in the programs and in the browser builds. Digitized data copyright (c) 2012-2015, The Mozilla Foundation and Telefonica S.A.; designed by Carrois Corporate GbR and Edenspiekermann AG. Fira Mono is a trademark of The Mozilla Corporation. Licence: SIL Open Font License, Version 1.1, the text of Bevy's own copy of it:"
+      ],
+      "texts": [{"file": "tools/licenses/texts/FiraMono-OFL.txt", "label": "SIL Open Font License 1.1, as it comes with Fira Mono"}]
+    },
+    {
+      "id": "cantarell",
+      "title": "Cantarell: a fallback font for window title bars (Linux)",
+      "paragraphs": [
+        "The {crate:sctk-adwaita} crate, which the windowing library winit uses to draw the game window's title bar when it runs as a Wayland client, embeds Cantarell Regular, to draw the title when the system has no font for it. It is in the Linux programs only. Copyright (c) 2009-2011, Understanding Limited; copyright (c) 2010-2011, Jakub Steiner. Licence: SIL Open Font License, Version 1.1:"
+      ],
+      "texts": [{"file": "tools/licenses/texts/Cantarell-OFL.txt", "label": "SIL Open Font License 1.1, with Cantarell's copyright lines"}]
+    },
+    {
+      "id": "editor-fonts",
+      "title": "Barlow Semi Condensed and Fredoka: the map editor's fonts",
+      "paragraphs": [
+        "The map editor (editor/ in the browser package and on the server) is set in Barlow Semi Condensed (copyright 2017 The Barlow Project Authors, https://github.com/jpt/barlow) and Fredoka (copyright 2016 The Fredoka Project Authors, https://github.com/hafontia/Fredoka-One), as WOFF2 files in editor/fonts/. Licence of both: SIL Open Font License, Version 1.1. Their texts are also beside the fonts, in editor/fonts/OFL-Barlow.txt and OFL-Fredoka.txt."
+      ],
+      "texts": [
+        {"file": "editor/fonts/OFL-Barlow.txt", "label": "Barlow Semi Condensed: SIL Open Font License 1.1"},
+        {"file": "editor/fonts/OFL-Fredoka.txt", "label": "Fredoka: SIL Open Font License 1.1"}
+      ]
+    },
+    {
+      "id": "bevy-shaders",
+      "title": "Shader code adapted from Bevy",
+      "paragraphs": [
+        "assets/shaders/hotdog_bend.wgsl and assets/shaders/hotdog_bend_prepass.wgsl are Bevy's mesh and prepass vertex shaders (mesh.wgsl and prepass.wgsl of {crate:bevy_pbr}, without their skin and morph-target parts) with the project's bend put on the position, the normal and the tangent. The Bevy part is licensed MIT OR Apache-2.0, as Bevy is; its MIT text is the one listed with {crate:bevy_pbr} in section 3. The project's added lines are GPL-3.0-only. The other shaders in assets/shaders and src/ are the project's own, and import Bevy's shader library at run time."
+      ]
+    },
+    {
+      "id": "bevy-tables",
+      "title": "Lookup tables inside Bevy's crates",
+      "paragraphs": [
+        "Bevy's crates embed a few lookup tables (KTX2 files), which come into the game with them: the tonemapping tables in {crate:bevy_core_pipeline}, the SMAA tables in {crate:bevy_anti_alias} and the area-light table in {crate:bevy_pbr}. Bevy distributes them with its own MIT OR Apache-2.0 licensing; they are, as Bevy says, made from these works.",
+        "Tony McMapface (tony_mc_mapface.ktx2): copyright (c) 2023 Tomasz Stachowiak, MIT OR Apache-2.0 (https://github.com/h3r2tic/tony-mc-mapface). The AgX table (AgX-default_contrast.ktx2) is made from the AgXc project's lookup table (https://github.com/MrLixm/AgXc), and the Blender Filmic table (Blender_-11_12.ktx2) from Blender's Filmic view transform: Bevy's file bevy_core_pipeline/src/tonemapping/luts/info.txt says how. SMAA (SMAAAreaLUT.ktx2, SMAASearchLUT.ktx2): Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez, https://github.com/iryoku/smaa, whose licence text is below. The linearly transformed cosines table (ltc.ktx2): Eric Heitz, Jonathan Dupuy, Stephen Hill and David Neubelt, \"Real-Time Polygonal-Light Shading with Linearly Transformed Cosines\", ACM Transactions on Graphics (Proceedings of ACM SIGGRAPH 2016) 35(4), 2016 (https://eheitzresearch.wordpress.com/415-2/), whose licence text, which asks for that reference and for its notice in binary distributions, is below."
+      ],
+      "texts": [
+        {"file": "tools/licenses/texts/TonyMcMapface-MIT.txt", "label": "Tony McMapface: MIT"},
+        {"file": "tools/licenses/texts/SMAA-MIT.txt", "label": "SMAA: its MIT licence"},
+        {"file": "tools/licenses/texts/ltc_code-BSD.txt", "label": "Linearly transformed cosines: its licence"}
+      ]
+    },
+    {
+      "id": "gamepad-db",
+      "title": "Game controller database (gamepads)",
+      "paragraphs": [
+        "Bevy's gamepad support, through the {crate:gilrs} crate, embeds the SDL_GameControllerDB list of how gamepads' buttons map (https://github.com/gabomdq/SDL_GameControllerDB), under the zlib licence of SDL, whose text is the LICENSE file of that list:"
+      ],
+      "texts": [{"file": "tools/licenses/texts/SDL_GameControllerDB-zlib.txt", "label": "SDL_GameControllerDB: LICENSE (zlib)"}]
+    },
+    {
+      "id": "wgpu-hal",
+      "title": "wgpu-hal, a modified copy",
+      "paragraphs": [
+        "{crate:wgpu-hal} 29.0.4 is vendored in vendor/wgpu-hal with one change: its WebGL 2 queue skips texture, sampler and vertex-attribute calls that would set what is already set (vendor/wgpu-hal/Cargo.toml and src/gles/queue.rs say which). Copyright (c) 2025 The gfx-rs developers; licensed MIT OR Apache-2.0, with its texts in vendor/wgpu-hal/LICENSE.MIT and LICENSE.APACHE, and listed with the crates in section 3."
+      ]
+    },
+    {
+      "id": "rust-std",
+      "title": "The Rust standard library",
+      "paragraphs": [
+        "Every program is linked with Rust's standard library, copyright The Rust Project Developers, licensed MIT OR Apache-2.0, and with the third-party code it contains (see https://github.com/rust-lang/rust/blob/master/COPYRIGHT). The MIT and Apache-2.0 texts in section 3 are those licences' texts."
+      ]
+    },
+    {
+      "id": "pixabay",
+      "title": "Kung Fu sound clips (Pixabay)",
+      "paragraphs": [
+        "The twenty-eight short sounds in assets/audio/kungfu/ (swings, hits, thuds, grunts, shouts, screams, stings and a quiet loop for the dojo, played in the Kung Fu mode) are cut and processed by tools/build_kungfu_user_sounds.py from twelve recordings that were downloaded from Pixabay's sound effects (https://pixabay.com/sound-effects/) and are used under the Pixabay Content License (https://pixabay.com/service/license-summary/): they are their uploaders' work, not the project's, and the GPL-3.0-only does not cover them. As the project understands that licence, it allows the sounds to be used, changed and published as part of a larger work such as a game without attribution; the credit is given here all the same. The recordings are not in the packages (only the cut clips are), and the clips are not offered as sound files to reuse on their own: take the originals from Pixabay.",
+        "The recordings, by their uploader and Pixabay id:"
+      ],
+      "rows": {
+        "head": ["Recording", "Uploader", "Pixabay id"],
+        "body": [
+          ["big punch short with male moan", "freesound_community", "83735"],
+          ["big punch with whoosh", "freesound_community", "103638"],
+          ["karate", "freesound_community", "100238"],
+          ["kung fu clothes hits and clothing sounds", "freesound_community", "73455"],
+          ["kung fu punch 4", "freesound_community", "105262"],
+          ["kung fu scream", "freesound_community", "43668"],
+          ["kung fu yell", "freesound_community", "6314"],
+          ["wu swords hip hopc", "freesound_community", "83035"],
+          ["kung fu in bamboo woods", "pixelpond", "361785"],
+          ["asiatic intro 1", "djartmusic", "283723"],
+          ["chinese ident transition 1", "djartmusic", "283708"],
+          ["chinese ident transition 3", "djartmusic", "283709"]
+        ]
+      }
+    },
+    {
+      "id": "dejavu",
+      "title": "Lettering on the package label",
+      "paragraphs": [
+        "assets/materials/package_label.png is the project's own picture, drawn by tools/build_package_label.py. Its lettering was rendered with the DejaVu fonts (https://dejavu-fonts.github.io/), whose free licence allows this; the picture is a rendering, not a copy of the fonts, and no font is in the packages for it. The brand on it, Snappington's, is made up for the game."
+      ]
+    }
+  ]
+}

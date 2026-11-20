@@ -1,0 +1,50 @@
+/target
+/target-map-release
+/target-native
+/target-visuals
+/target-weapons
+/target-props
+/target-effects
+/target-actor
+/target-death
+/target-view
+/target-netprobe
+/target-kitchen
+/target-kitchen-native
+/target-kitchen-sim
+/target-kitchen-server
+/target-kitchen-web
+/target-web
+/target-load
+/target-load-*
+/target-mayo
+/target-deathcam
+/target-sandbox
+/pkg
+/pkg-webgpu
+# Rendered videos and the copies of local files kept when syncing from another machine.
+/renders
+/.presync-backup
+/dist
+/crates/*/target
+/reports
+# The server's recorded matches (crates/server replay.rs, --replays).
+/replays
+/log_*.txt
+/.agents
+/.codex
+/.aws
+/.env*
+**/__pycache__/
+*.pyc
+# Personal source images and reconstruction intermediates, which must never be committed (THIRD_PARTY_NOTICES.md).
+/assets/person.png
+/assets/reconstructed/
+/src/reconstructed_face.rs
+# Brainstorm companion and plan-execution scratch.
+/.superpowers/
+/target-agent-*
+/dist
+
+# The original Pixabay downloads the Kung Fu clips are cut from (THIRD_PARTY_NOTICES.md): the owner's copy only.
+/assets/audio/*.mp3

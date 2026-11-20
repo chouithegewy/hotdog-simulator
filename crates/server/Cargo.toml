@@ -1,0 +1,40 @@
+[package]
+name = "hotdog-server"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["David Nunes-Childs"]
+description = "Hotdog Simulator's server: the page, the editor, the assets, the lobby and the game, on one port."
+
+# A package of its own, with its own lock file and target directory (crates/server/target), so that building the
+# server never touches the game client's dependency tree or rebuilds Bevy.
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hotdog-server"
+path = "src/main.rs"
+
+[dependencies]
+kitchen-sim = { path = "../kitchen-sim" }
+glam = "0.32.1"
+axum = { version = "0.8.9", features = ["ws"] }
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.9"
+regex = "1"
+unicode-segmentation = "1.12"
+unicode-normalization = "0.1"
+mime = "0.3"
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

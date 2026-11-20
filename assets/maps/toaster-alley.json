@@ -1,0 +1,60 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Toaster Alley",
+  "theme": "night",
+  "mode": "siege",
+  "bounds": [-2.4, 2.1, 2.4, 3.63],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [2.15, 2.3], "yaw": 1.57},
+    {"p": [2.15, 2.86], "yaw": 1.57},
+    {"p": [2.15, 3.45], "yaw": 1.57},
+    {"p": [1.85, 2.6], "yaw": 1.57},
+    {"p": [1.85, 3.1], "yaw": 1.57}
+  ],
+  "spawns": [
+    {"p": [-1.85, 2.7]},
+    {"p": [-1.85, 2.86]},
+    {"p": [-1.85, 3.02]}
+  ],
+  "pickups": [
+    {"p": [0, 2.86], "weapon": 4, "ammo": 4},
+    {"p": [-0.7, 2.3], "weapon": 1, "ammo": 12},
+    {"p": [0.7, 3.45], "weapon": 2, "ammo": 6},
+    {"p": [1.4, 2.86], "weapon": 3, "ammo": 90},
+    {"p": [-1.1, 3.45], "weapon": 5, "ammo": 40},
+    {"p": [0.35, 2.3], "weapon": 1, "ammo": 12},
+    {"p": [-0.98, 2.86], "weapon": 0},
+    {"p": [0.98, 2.86], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-2.35, 2.66, -1.95, 3.06], "height": 0.25, "style": "microwave", "facing": "+x"},
+    {"rect": [-1.55, 2.47, -1.23, 2.63], "height": 0.22, "style": "toaster", "facing": "-z"},
+    {"rect": [-0.91, 2.47, -0.59, 2.63], "height": 0.22, "style": "toaster", "facing": "-z"},
+    {"rect": [-0.16, 2.47, 0.16, 2.63], "height": 0.22, "style": "toaster", "facing": "-z"},
+    {"rect": [0.59, 2.47, 0.91, 2.63], "height": 0.22, "style": "toaster", "facing": "-z"},
+    {"rect": [1.29, 2.47, 1.61, 2.63], "height": 0.22, "style": "toaster", "facing": "-z"},
+    {"rect": [-1.58, 3.1, -1.26, 3.26], "height": 0.22, "style": "toaster", "facing": "+z"},
+    {"rect": [-0.85, 3.1, -0.53, 3.26], "height": 0.22, "style": "toaster", "facing": "+z"},
+    {"rect": [-0.14, 3.1, 0.18, 3.26], "height": 0.22, "style": "toaster", "facing": "+z"},
+    {"rect": [0.53, 3.1, 0.85, 3.26], "height": 0.22, "style": "toaster", "facing": "+z"},
+    {"rect": [1.29, 3.1, 1.61, 3.26], "height": 0.22, "style": "toaster", "facing": "+z"},
+    {"rect": [0.45, 2.87, 0.59, 3], "height": 0.27, "style": "dark"},
+    {"rect": [-0.8, 3.37, -0.64, 3.54], "height": 0.27, "style": "dark"},
+    {"rect": [-1.42, 3.41, -1.3, 3.54], "height": 0.22, "style": "metal"}
+  ],
+  "decks": [
+    {"rect": [-0.25, 3.35, 0.25, 3.6], "height": 0.2, "style": "metal"}
+  ],
+  "ramps": [
+    {"rect": [-0.55, 3.35, -0.25, 3.6], "base": 0, "height": 0.2, "rise": "+x"}
+  ],
+  "props": [
+    {"kind": "turret", "p": [0, 3.48], "base": 0.22, "yaw": 0},
+    {"kind": "bowl", "p": [1.2, 2.3], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [-0.35, 2.3], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [1, 3.45], "base": 0, "yaw": 0}
+  ],
+  "zones": []
+}

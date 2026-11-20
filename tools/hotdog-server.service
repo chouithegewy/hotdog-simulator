@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Hotdog Simulator's server as a systemd user service: the page, both browser builds, the assets, the map editor, the
+# lobby and the game, all on port 8137 of every network the machine is on. Players open http://HOST:8137/?mp.
+#
+# Install (see README.md, Multiplayer):
+#   cargo build --release --manifest-path crates/server/Cargo.toml
+#   mkdir -p ~/.config/systemd/user && cp tools/hotdog-server.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now hotdog-server
+#   journalctl --user -u hotdog-server -f          # its log
+#   sudo loginctl enable-linger "$USER"             # keep it running while nobody is logged in
+# The paths below assume the repository is at ~/projects/hotdog-simulator: edit WorkingDirectory and ExecStart if not.
+
+[Unit]
+Description=Hotdog Simulator server (page, editor, lobby and game on port 8137)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/hotdog-simulator
+ExecStart=%h/projects/hotdog-simulator/crates/server/target/release/hotdog-server --host 0.0.0.0 --port 8137
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hotdog-server
+
+[Install]
+WantedBy=default.target

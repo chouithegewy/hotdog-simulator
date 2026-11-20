@@ -1,0 +1,70 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Counter Siege",
+  "theme": "kitchen",
+  "mode": "siege",
+  "bounds": [-1.8, 2.27, 1.8, 3.63],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [0.83, 3.23], "yaw": 0.9},
+    {"p": [0.3, 3.08], "yaw": 0.9},
+    {"p": [-0.05, 2.52], "yaw": 0.9},
+    {"p": [0.94, 2.48], "yaw": 0.9},
+    {"p": [-0.65, 3.55], "yaw": 0.9}
+  ],
+  "spawns": [
+    {"p": [-1.23, 3.02]},
+    {"p": [-1.195, 3.02]},
+    {"p": [-1.16, 3.02]}
+  ],
+  "pickups": [
+    {"p": [-0.7, 2.45], "weapon": 2, "ammo": 6},
+    {"p": [0.06, 3.4], "weapon": 3, "ammo": 90},
+    {"p": [1.6, 2.38], "weapon": 4, "ammo": 4},
+    {"p": [-1.65, 2.4], "weapon": 1, "ammo": 12},
+    {"p": [-0.06, 2.38], "weapon": 1, "ammo": 12},
+    {"p": [1.1, 2.55], "weapon": 2, "ammo": 4},
+    {"p": [-1.46, 2.67], "weapon": 0},
+    {"p": [1.46, 2.67], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-1.46, 3.1, -0.96, 3.43], "height": 0.25, "style": "microwave", "facing": "-z"},
+    {"rect": [1.29, 3.17, 1.66, 3.43], "height": 0.25, "style": "toaster", "facing": "-z"},
+    {"rect": [-0.45, 2.7, -0.23, 2.92], "height": 0.25, "style": "steel"},
+    {"rect": [0.34, 2.45, 0.58, 2.64], "height": 0.25, "style": "steel"},
+    {"rect": [-1.57, 2.37, -1.37, 2.57], "height": 0.25, "style": "steel"},
+    {"rect": [-1.36, 2.39, -1.16, 2.59], "height": 0.25, "style": "steel"},
+    {"rect": [-1.16, 2.45, -0.96, 2.65], "height": 0.25, "style": "steel"},
+    {"rect": [-1.81, 2.57, -1.61, 2.77], "height": 0.25, "style": "steel"},
+    {"rect": [-0.93, 2.72, -0.73, 2.92], "height": 0.25, "style": "steel"},
+    {"rect": [-0.54, 2.32, -0.34, 2.52], "height": 0.25, "style": "steel"},
+    {"rect": [-0.72, 3.04, -0.52, 3.24], "height": 0.25, "style": "steel"},
+    {"rect": [-0.43, 3.04, -0.23, 3.24], "height": 0.25, "style": "steel"},
+    {"rect": [-0.11, 2.66, 0.09, 2.86], "height": 0.25, "style": "steel"},
+    {"rect": [0.16, 2.72, 0.36, 2.92], "height": 0.25, "style": "steel"},
+    {"rect": [0.44, 2.77, 0.64, 2.97], "height": 0.25, "style": "steel"},
+    {"rect": [0.77, 2.73, 0.97, 2.93], "height": 0.25, "style": "steel"},
+    {"rect": [1.07, 2.73, 1.27, 2.93], "height": 0.25, "style": "steel"},
+    {"rect": [-0.4, 3.3, -0.2, 3.5], "height": 0.25, "style": "steel"},
+    {"rect": [0.21, 3.26, 0.41, 3.46], "height": 0.25, "style": "steel"},
+    {"rect": [-0.1, 3.05, 0.1, 3.25], "height": 0.25, "style": "steel"},
+    {"rect": [0.94, 3.01, 1.14, 3.21], "height": 0.25, "style": "steel"},
+    {"rect": [0.44, 3.16, 0.64, 3.36], "height": 0.25, "style": "steel"}
+  ],
+  "decks": [
+    {"rect": [1.25, 3.16, 1.76, 3.61], "height": 0.28, "style": "metal"},
+    {"rect": [-0.61, 2.78, -0.11, 3.18], "height": 0.28, "style": "metal"},
+    {"rect": [0.16, 2.57, 0.66, 2.97], "height": 0.28, "style": "metal"},
+    {"rect": [0.8, 2.74, 1.3, 3.14], "height": 0.28, "style": "metal"},
+    {"rect": [-0.76, 3.13, -0.26, 3.53], "height": 0.28, "style": "metal"}
+  ],
+  "ramps": [
+    {"rect": [0.55, 3.45, 1.25, 3.61], "base": 0, "height": 0.28, "rise": "+x"},
+    {"rect": [1.55, 2.46, 1.75, 3.16], "base": 0, "height": 0.28, "rise": "+z"}
+  ],
+  "props": [
+    {"kind": "turret", "p": [1.34, 3.29], "base": 0.2975, "yaw": 1.5708}
+  ],
+  "zones": []
+}

@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# nginx in front of hotdog-server (README.md, "Continuous integration and deployment"), as an alternative to
+# Caddyfile.example: HTTPS for hotdog-simulator.chilos.dev with a Let's Encrypt certificate from certbot, HTTP redirected
+# to HTTPS, and everything passed on to the server on 127.0.0.1:8150, WebSockets (/ws, /lobby) included.
+#
+# Install (Debian, Ubuntu; as root):
+#   apt-get install nginx certbot
+#   mkdir -p /var/www/certbot
+#   cp nginx.conf.example /etc/nginx/sites-available/hotdog-simulator
+#   ln -s /etc/nginx/sites-available/hotdog-simulator /etc/nginx/sites-enabled/
+# The certificate, the first time: comment out the second server block (its certificate does not exist yet), then
+#   nginx -t && systemctl reload nginx
+#   certbot certonly --webroot -w /var/www/certbot -d hotdog-simulator.chilos.dev --deploy-hook "systemctl reload nginx"
+# and put the second block back:
+#   nginx -t && systemctl reload nginx
+# certbot's timer renews it from then on (and reloads nginx: the deploy hook is remembered); `certbot renew --dry-run`
+# tries that. Ports 80 and 443 must be open to the internet.
+#
+# What the game needs here (the comments below say where):
+# - WebSockets: HTTP/1.1 to the server and the Upgrade and Connection headers passed on. The server pings every WebSocket
+#   every 20 seconds (hotdog-server --ping), so a lobby that is only sitting there is never silent for longer than that
+#   and nginx's own 60 s read timeout would not cut it. The long timeouts below are only a margin (for a server started
+#   with --ping 0, or a stretch when the pings are late); they are not needed for the game to keep its sockets.
+# - Compression: the server already sends the builds' module and script compressed (brotli or gzip, as the browser
+#   takes them), and nginx never compresses a response that has a Content-Encoding. gzip below is for what comes plain.
+# - Content types and caching: the server's own (application/wasm; Cache-Control: no-cache with an ETag on every file,
+#   because the bundle's names carry no hash: a deploy is picked up at the next load). Do not add proxy_cache or
+#   expires here.
+# - No cross-origin isolation (COOP/COEP): the game uses no SharedArrayBuffer or WebAssembly threads.
+
+# Connection: upgrade for a WebSocket's handshake, close for everything else (as nginx sends by default).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name hotdog-simulator.chilos.dev;
+
+    # certbot's HTTP-01 challenge (certonly --webroot).
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name hotdog-simulator.chilos.dev;
+
+    ssl_certificate     /etc/letsencrypt/live/hotdog-simulator.chilos.dev/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hotdog-simulator.chilos.dev/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:hotdog:10m;
+
+    # Browsers keep to HTTPS for this name for a year (WebGPU needs a secure page anyway).
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    server_tokens off;
+
+    # Compression of what the server sends plain. Not application/wasm: a module is sent plain only to a browser that
+    # takes neither brotli nor gzip.
+    gzip on;
+    gzip_proxied any;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/css text/javascript application/javascript application/json text/plain;
+
+    # Nothing the game sends up is large (a WebSocket message is at most 16 KiB, and the page posts nothing).
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8150;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSockets last for a whole session. The server's pings (every 20 s) keep even a quiet lobby's from ever being
+        # idle for nginx's default 60 s, so these hour-long timeouts only add margin: for a server started with --ping 0,
+        # or a ping that is late. A client that has gone is let go by the server itself, after three unanswered pings.
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        # The builds stream through as they come (about 8 MB each, compressed) rather than wait in temporary files.
+        proxy_max_temp_file_size 0;
+    }
+}

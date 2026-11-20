@@ -1,0 +1,62 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Treetop Decks",
+  "theme": "jungle",
+  "mode": "siege",
+  "bounds": [-2.4, 2.1, 2.4, 3.63],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [-1.4, 2.9], "yaw": 3.14},
+    {"p": [1.4, 2.9], "yaw": 3.14},
+    {"p": [-0.8, 2.95], "yaw": 3.14},
+    {"p": [0.8, 2.9], "yaw": 3.14},
+    {"p": [0, 3.05], "yaw": 3.14}
+  ],
+  "spawns": [
+    {"p": [-0.2, 2.6]},
+    {"p": [0, 2.6]},
+    {"p": [0.2, 2.6]}
+  ],
+  "pickups": [
+    {"p": [-2, 3.4], "weapon": 2, "ammo": 6},
+    {"p": [2, 3.4], "weapon": 4, "ammo": 4},
+    {"p": [0, 3.42], "weapon": 3, "ammo": 90},
+    {"p": [-2.05, 2.4], "weapon": 1, "ammo": 12},
+    {"p": [2.05, 2.4], "weapon": 5, "ammo": 40},
+    {"p": [-1, 2.35], "weapon": 1, "ammo": 12},
+    {"p": [1, 2.35], "weapon": 1, "ammo": 12},
+    {"p": [-1.88, 2.86], "weapon": 0},
+    {"p": [1.88, 2.86], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-0.25, 2.13, 0.25, 2.47], "height": 0.25, "style": "microwave", "facing": "+z"},
+    {"rect": [0.49, 2.4, 0.65, 2.56], "height": 0.21, "style": "wood"},
+    {"rect": [-0.65, 2.4, -0.49, 2.56], "height": 0.21, "style": "wood"},
+    {"rect": [0.76, 2.59, 0.88, 2.77], "height": 0.27, "style": "wood"},
+    {"rect": [-0.88, 2.59, -0.76, 2.77], "height": 0.27, "style": "wood"}
+  ],
+  "decks": [
+    {"rect": [-2.3, 3.1, -1.65, 3.58], "height": 0.3, "style": "wood"},
+    {"rect": [1.65, 3.1, 2.3, 3.58], "height": 0.3, "style": "wood"},
+    {"rect": [-0.55, 3.2, 0.55, 3.58], "height": 0.16, "style": "green"},
+    {"rect": [-2.3, 2.2, -1.75, 2.6], "height": 0.18, "style": "stone"},
+    {"rect": [1.75, 2.2, 2.3, 2.6], "height": 0.18, "style": "stone"}
+  ],
+  "ramps": [
+    {"rect": [-1.65, 3.1, -1.2, 3.58], "base": 0, "height": 0.3, "rise": "-x"},
+    {"rect": [1.2, 3.1, 1.65, 3.58], "base": 0, "height": 0.3, "rise": "+x"},
+    {"rect": [-0.55, 2.9, 0.55, 3.2], "base": 0, "height": 0.16, "rise": "+z"},
+    {"rect": [-1.75, 2.2, -1.45, 2.6], "base": 0, "height": 0.18, "rise": "-x"},
+    {"rect": [1.45, 2.2, 1.75, 2.6], "base": 0, "height": 0.18, "rise": "+x"}
+  ],
+  "props": [
+    {"kind": "turret", "p": [-2, 3.34], "base": 0.32, "yaw": -1.2},
+    {"kind": "turret", "p": [2, 3.34], "base": 0.32, "yaw": 1.2},
+    {"kind": "pillow", "p": [-0.4, 3.42], "base": 0.16, "yaw": 0},
+    {"kind": "napkin", "p": [0.88, 3.305], "base": 0, "yaw": 1.5708},
+    {"kind": "chair", "p": [-1.1, 2.45], "base": 0, "yaw": 1},
+    {"kind": "crate", "p": [1.15, 2.45], "base": 0, "yaw": 0}
+  ],
+  "zones": []
+}

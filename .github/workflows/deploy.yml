@@ -1,0 +1,332 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 David Nunes-Childs
+#
+# Deploys main to https://hotdog-simulator.chilos.dev after every merge (README.md, "Continuous integration and
+# deployment"), and any commit of main by hand (Actions > deploy > Run workflow, with the commit: a rollback that goes
+# through the tests again, or a redeploy).
+#
+#   commit   the commit to deploy: the push's, or the one asked for, which must be on main
+#   tests    ci.yml, called for that commit: every suite, the same `ci-ok`
+#   linux    the Linux package (tools/build-all.sh linux: the server's launcher and its v2 and v3 builds are what is
+#            deployed), as an artifact
+#   web      the web package (tools/build-all.sh web: both browser builds and the assets), as an artifact
+#   deploy   in the `production` environment, one at a time: tools/deploy/deploy.sh over SSH, which uploads, makes the
+#            release live, checks it at PUBLIC_URL and rolls back if it fails there
+#   smoke    afterwards, headless Chrome plays a round from the public page and leaves its tab (tools/check_tab_switch.mjs);
+#            it never fails the run (software rendering on a runner is slow and its verdict only a hint)
+#
+# Why the tests run inside this workflow (ci.yml called as a reusable workflow) and not as a separate run that this one
+# waits for (`workflow_run`): the commit deployed is the commit tested, in the same run, with nothing to look up; a
+# manual deploy of any commit is tested the same way; a deploy can never start from someone else's run (workflow_run
+# also fires for pull requests from forks whose branch is named main), nor from an old run re-run later. The packages
+# are built while the tests run, and the deploy waits for both. ci.yml leaves pushes to main to this workflow, so a
+# merge is tested once.
+#
+# Configuration, all of it in the repository's (or the production environment's) settings; until DEPLOY_HOST,
+# DEPLOY_USER, DEPLOY_PATH, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS are all set, the deploy job only says so and passes,
+# so this workflow is safe on main before the server is ready:
+#   secrets    DEPLOY_SSH_KEY       the deploy key's private half (OpenSSH format, no passphrase)
+#              DEPLOY_KNOWN_HOSTS   the server's host key lines (ssh-keyscan -p PORT HOST): the only key accepted
+#   variables  DEPLOY_HOST          the server's address (hotdog-simulator.chilos.dev, or its IP)
+#              DEPLOY_USER          the account the game runs as there (it needs no root)
+#              DEPLOY_PATH          its deploy folder (~/hotdog-simulator, as remote-setup.sh made it)
+#              DEPLOY_PORT          the server's SSH port (22)
+#              PUBLIC_URL           the address checked after a deploy (https://hotdog-simulator.chilos.dev)
+#              DEPLOY_KEEP          releases kept on the server (5)
+#              DEPLOY_SCOPE         user (a systemd user service, the default) or system (remote-setup.sh --system)
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "The commit to deploy: a commit, tag or branch whose commit is on main"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: nightly-2026-10-04
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The runner's disk is smaller than a workstation's; the builds need about 4 GB (Linux) and 3 GB (web).
+  MIN_FREE_GB: "10"
+
+jobs:
+  commit:
+    name: commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: History (a manual deploy only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: The commit, on main
+        id: commit
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ inputs.ref }}
+        run: |
+          if [ "$EVENT" != workflow_dispatch ]; then
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha=$(git rev-parse --verify --quiet "origin/$REF^{commit}" || git rev-parse --verify --quiet "$REF^{commit}") || {
+            echo "::error::There is no commit $REF"
+            exit 1
+          }
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$REF ($sha) is not on main: only main's commits are deployed"
+            exit 1
+          fi
+          echo "Deploying $REF: $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  # (Its own env is ci.yml's, HOTDOG_TIMING_SLACK among it: nothing here sets the timing slack, since this workflow's
+  # own jobs run no test, and a called workflow does not see this one's env.)
+  tests:
+    name: tests
+    needs: commit
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.commit.outputs.sha }}
+
+  linux:
+    name: Linux package
+    needs: commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.commit.outputs.sha }}
+          persist-credentials: false
+      - name: Disk space (the runner's preinstalled SDKs this does not use)
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Libraries to link against
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-gnu
+      - name: zig and cargo-zigbuild (to link against glibc 2.31, as release.yml does), in a virtual environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet ziglang==0.17.1 cargo-zigbuild==0.24.1
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+          echo "ZIG=$("$RUNNER_TEMP/zig/bin/python" -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target/dist-linux-v2
+            . -> target/dist-linux-v3
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: tools/build-all.sh linux
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deploy-linux-x86_64
+          path: dist/*-linux-x86_64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  web:
+    name: web package
+    needs: commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.commit.outputs.sha }}
+          persist-credentials: false
+      - name: Disk space (the runner's preinstalled SDKs this does not use)
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Pillow (for the WebP food textures, when a PNG is newer), where `python3 -I` finds it
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master of 2026-11-15
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # (Before the tools: its cache holds ~/.cargo/bin, and with it the wasm-bindgen installed below.)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: . -> target/dist-web
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: wasm-bindgen (the version Cargo.lock pins) and wasm-opt (binaryen)
+        run: |
+          version=$(awk '$0 == "name = \"wasm-bindgen\"" {getline; gsub(/"/, "", $3); print $3; exit}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - run: tools/build-all.sh web
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deploy-web
+          path: dist/*-web.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  deploy:
+    name: deploy
+    needs: [commit, tests, linux, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_URL || 'https://hotdog-simulator.chilos.dev' }}
+    # One deploy at a time; one waiting is replaced by a newer one, never one under way.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
+      url: ${{ steps.settings.outputs.url }}
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://hotdog-simulator.chilos.dev' }}
+      DEPLOY_KEEP: ${{ vars.DEPLOY_KEEP || '5' }}
+      DEPLOY_SCOPE: ${{ vars.DEPLOY_SCOPE || 'user' }}
+      SHA: ${{ needs.commit.outputs.sha }}
+    steps:
+      - name: Deployment settings
+        id: settings
+        env:
+          HAVE_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+          HAVE_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS != '' }}
+        run: |
+          missing=()
+          [ -n "$DEPLOY_HOST" ] || missing+=("variable DEPLOY_HOST")
+          [ -n "$DEPLOY_USER" ] || missing+=("variable DEPLOY_USER")
+          [ -n "$DEPLOY_PATH" ] || missing+=("variable DEPLOY_PATH")
+          [ "$HAVE_KEY" = true ] || missing+=("secret DEPLOY_SSH_KEY")
+          [ "$HAVE_KNOWN_HOSTS" = true ] || missing+=("secret DEPLOY_KNOWN_HOSTS")
+          echo "url=$PUBLIC_URL" >> "$GITHUB_OUTPUT"
+          if [ ${#missing[@]} -gt 0 ]; then
+            message="Not deployed: the repository has no ${missing[*]} yet (README.md, \"Continuous integration and deployment\")."
+            echo "::notice title=Deployment skipped::$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Deploying $SHA to $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH (SSH port $DEPLOY_PORT), checked at $PUBLIC_URL"
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Is this still main's newest commit?
+        id: newest
+        if: ${{ steps.settings.outputs.ready == 'true' && github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Runs of two quick merges can finish in either order: an older commit is never deployed over a newer one.
+          # (The newer one's own run deploys it; a manual run deploys whatever it was asked to.)
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [ "$tip" != "$SHA" ]; then
+            message="Not deployed: main has moved on to $tip since $SHA, and that commit's own run deploys it."
+            echo "::notice title=Deployment skipped::$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "newest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "newest=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: The deploy scripts (this workflow's own)
+        if: ${{ steps.settings.outputs.ready == 'true' && steps.newest.outputs.newest != 'false' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/deploy
+          persist-credentials: false
+      - name: The packages
+        if: ${{ steps.settings.outputs.ready == 'true' && steps.newest.outputs.newest != 'false' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: deploy-*
+          path: dist
+          merge-multiple: true
+      - name: The deploy key and the server's host key
+        if: ${{ steps.settings.outputs.ready == 'true' && steps.newest.outputs.newest != 'false' }}
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/ssh/key"
+          chmod 600 "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/ssh/key" > /dev/null || {
+            echo "::error::DEPLOY_SSH_KEY is not a private key ssh can use without a passphrase"
+            exit 1
+          }
+      - name: Deploy
+        id: deploy
+        if: ${{ steps.settings.outputs.ready == 'true' && steps.newest.outputs.newest != 'false' }}
+        env:
+          DEPLOY_IDENTITY: ${{ runner.temp }}/ssh/key
+          DEPLOY_KNOWN_HOSTS_FILE: ${{ runner.temp }}/ssh/known_hosts
+          DEPLOY_COMMIT: ${{ needs.commit.outputs.sha }}
+          DEPLOY_NOTE: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "## Deploy" >> "$GITHUB_STEP_SUMMARY"
+          tools/deploy/deploy.sh "$DEPLOY_USER@$DEPLOY_HOST" "$DEPLOY_PATH" dist/
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+      - name: Forget the keys
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/ssh"
+
+  smoke:
+    name: smoke test (headless Chrome, never fails the run)
+    needs: deploy
+    if: ${{ needs.deploy.outputs.deployed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Chrome, drawing in software (a runner has no GPU)
+        run: |
+          printf '%s\n' '#!/bin/sh' 'exec google-chrome "$@" --use-angle=swiftshader --enable-unsafe-swiftshader' > "$RUNNER_TEMP/chrome"
+          chmod +x "$RUNNER_TEMP/chrome"
+          google-chrome --version
+      - name: A round in the public page, away to another tab and back
+        env:
+          CHROME_PATH: ${{ runner.temp }}/chrome
+          HOTDOG_CHECK_OUT: ${{ runner.temp }}/tab-switch
+          HOTDOG_CHECK_TEMP: ${{ runner.temp }}
+          PUBLIC_URL: ${{ needs.deploy.outputs.url }}
+        # Offline only (play, not mp): the check must never join the public lobby.
+        run: node tools/check_tab_switch.mjs "$PUBLIC_URL/" 'play&mode=ffa&webgl2&quality=lowest'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: smoke-tab-switch
+          path: ${{ runner.temp }}/tab-switch
+          if-no-files-found: ignore
+          retention-days: 7

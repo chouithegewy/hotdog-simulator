@@ -1,0 +1,96 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Long Fort",
+  "theme": "kitchen",
+  "mode": "forts",
+  "build": 150,
+  "bounds": [-3, 2.2, 3, 4],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [-2.75, 2.9], "yaw": -1.5708, "team": "mustard"},
+    {"p": [-2.75, 3.1], "yaw": -1.5708, "team": "mustard"},
+    {"p": [-2.75, 3.3], "yaw": -1.5708, "team": "mustard"},
+    {"p": [2.75, 2.9], "yaw": 1.5708, "team": "ketchup"},
+    {"p": [2.75, 3.1], "yaw": 1.5708, "team": "ketchup"},
+    {"p": [2.75, 3.3], "yaw": 1.5708, "team": "ketchup"}
+  ],
+  "spawns": [
+    {"p": [-0.5, 3.55]},
+    {"p": [0.5, 3.55]},
+    {"p": [-0.5, 2.45]},
+    {"p": [0.5, 2.45]}
+  ],
+  "pickups": [
+    {"p": [-0.8, 2.45], "weapon": 2, "ammo": 5},
+    {"p": [-0.8, 3.1], "weapon": 3, "ammo": 80},
+    {"p": [-0.8, 3.75], "weapon": 4, "ammo": 3},
+    {"p": [-1.25, 2.6], "weapon": 1, "ammo": 12},
+    {"p": [-1.25, 3.5], "weapon": 1, "ammo": 12},
+    {"p": [0.8, 2.45], "weapon": 2, "ammo": 5},
+    {"p": [0.8, 3.1], "weapon": 3, "ammo": 80},
+    {"p": [0.8, 3.75], "weapon": 4, "ammo": 3},
+    {"p": [1.25, 2.6], "weapon": 1, "ammo": 12},
+    {"p": [1.25, 3.5], "weapon": 1, "ammo": 12},
+    {"p": [-1.8, 3.8], "weapon": 6, "ammo": 30},
+    {"p": [-2.78, 2.42], "weapon": 0},
+    {"p": [1.8, 3.8], "weapon": 6, "ammo": 30},
+    {"p": [2.78, 2.42], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-0.31, 3.52, 0.31, 4], "height": 0.36, "style": "microwave", "facing": "-z"},
+    {"rect": [-1.3, 2.95, -1.1, 3.25], "height": 0.25, "style": "steel"},
+    {"rect": [-1.9, 2.2, -1.7, 2.55], "height": 0.2, "style": "wood"},
+    {"rect": [1.1, 2.95, 1.3, 3.25], "height": 0.25, "style": "steel"},
+    {"rect": [1.7, 2.2, 1.9, 2.55], "height": 0.2, "style": "wood"}
+  ],
+  "decks": [
+    {"rect": [-0.3, 2.9, 0.3, 3.3], "height": 0.12, "style": "wood"},
+    {"rect": [-2.1, 3.6, -1.5, 4], "height": 0.2, "style": "metal"},
+    {"rect": [1.5, 3.6, 2.1, 4], "height": 0.2, "style": "metal"}
+  ],
+  "ramps": [
+    {"rect": [-0.6, 2.9, -0.3, 3.3], "base": 0, "height": 0.12, "rise": "+x"},
+    {"rect": [-1.5, 3.6, -1.1, 4], "base": 0, "height": 0.2, "rise": "-x"},
+    {"rect": [0.3, 2.9, 0.6, 3.3], "base": 0, "height": 0.12, "rise": "-x"},
+    {"rect": [1.1, 3.6, 1.5, 4], "base": 0, "height": 0.2, "rise": "+x"}
+  ],
+  "props": [
+    {"kind": "chair", "p": [-2, 2.8], "base": 0, "yaw": 1.5708},
+    {"kind": "chair", "p": [-2, 3.1], "base": 0, "yaw": 1.5708},
+    {"kind": "chair", "p": [-2, 3.4], "base": 0, "yaw": 1.5708},
+    {"kind": "crate", "p": [-1.75, 2.75], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [-1.75, 2.95], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [-1.75, 3.15], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [-1.75, 3.35], "base": 0, "yaw": 0},
+    {"kind": "pillow", "p": [-1.5, 2.7], "base": 0, "yaw": 1.5708},
+    {"kind": "pillow", "p": [-1.5, 2.9], "base": 0, "yaw": 1.5708},
+    {"kind": "pillow", "p": [-1.5, 3.1], "base": 0, "yaw": 1.5708},
+    {"kind": "pillow", "p": [-1.5, 3.3], "base": 0, "yaw": 1.5708},
+    {"kind": "pillow", "p": [-1.5, 3.5], "base": 0, "yaw": 1.5708},
+    {"kind": "napkin", "p": [-2.24, 2.46], "base": 0, "yaw": 0},
+    {"kind": "napkin", "p": [-2.31, 3.1], "base": 0, "yaw": 1.5708},
+    {"kind": "napkin", "p": [-2.5, 3.74], "base": 0, "yaw": 0},
+    {"kind": "chair", "p": [2, 2.8], "base": 0, "yaw": -1.5708},
+    {"kind": "chair", "p": [2, 3.1], "base": 0, "yaw": -1.5708},
+    {"kind": "chair", "p": [2, 3.4], "base": 0, "yaw": -1.5708},
+    {"kind": "crate", "p": [1.75, 2.75], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [1.75, 2.95], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [1.75, 3.15], "base": 0, "yaw": 0},
+    {"kind": "crate", "p": [1.75, 3.35], "base": 0, "yaw": 0},
+    {"kind": "pillow", "p": [1.5, 2.7], "base": 0, "yaw": -1.5708},
+    {"kind": "pillow", "p": [1.5, 2.9], "base": 0, "yaw": -1.5708},
+    {"kind": "pillow", "p": [1.5, 3.1], "base": 0, "yaw": -1.5708},
+    {"kind": "pillow", "p": [1.5, 3.3], "base": 0, "yaw": -1.5708},
+    {"kind": "pillow", "p": [1.5, 3.5], "base": 0, "yaw": -1.5708},
+    {"kind": "napkin", "p": [2.24, 2.46], "base": 0, "yaw": 0},
+    {"kind": "napkin", "p": [2.31, 3.1], "base": 0, "yaw": -1.5708},
+    {"kind": "napkin", "p": [2.5, 3.74], "base": 0, "yaw": 0}
+  ],
+  "zones": [
+    {"kind": "base", "team": "mustard", "rect": [-3, 2.7, -2.5, 3.5]},
+    {"kind": "base", "team": "ketchup", "rect": [2.5, 2.7, 3, 3.5]},
+    {"kind": "field", "rect": [-0.04, 2.2, 0.04, 4]},
+    {"kind": "bacon", "p": [0, 3.1]}
+  ]
+}

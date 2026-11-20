@@ -1,0 +1,25 @@
+[package]
+name = "hotdog-launcher"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["David Nunes-Childs"]
+description = "The packages' launchers: start the x86-64-v3 or the x86-64-v2 build of the game or the server, whichever this processor runs best."
+
+# A package of its own, with no dependencies, built for plain x86-64 (tools/build-linux.sh, build-windows.sh), so that
+# it runs on any 64-bit x86 processor, whatever level the programs it starts were built for.
+
+[[bin]]
+name = "hotdog-launch-game"
+path = "src/bin/game.rs"
+
+[[bin]]
+name = "hotdog-launch-server"
+path = "src/bin/server.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

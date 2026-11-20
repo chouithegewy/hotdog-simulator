@@ -1,0 +1,51 @@
+{
+  "format": "hotdog-map",
+  "version": 1,
+  "name": "Counter Siege",
+  "theme": "kitchen",
+  "mode": "siege",
+  "bounds": [-1.8, 2.27, 1.8, 3.63],
+  "nav": {"cell": 0.04, "clearance": 0.035},
+  "starts": [
+    {"p": [0.83, 3.23], "yaw": 0.9},
+    {"p": [0.3, 3.08], "yaw": 0.9},
+    {"p": [-0.05, 2.52], "yaw": 0.9},
+    {"p": [0.94, 2.48], "yaw": 0.9},
+    {"p": [-0.65, 3.55], "yaw": 0.9}
+  ],
+  "spawns": [
+    {"p": [-1.23, 3.02]},
+    {"p": [-1.195, 3.02]},
+    {"p": [-1.16, 3.02]}
+  ],
+  "pickups": [
+    {"p": [-0.7, 2.45], "weapon": 2, "ammo": 6},
+    {"p": [0.06, 3.4], "weapon": 3, "ammo": 90},
+    {"p": [1.6, 2.38], "weapon": 4, "ammo": 4},
+    {"p": [-1.65, 2.4], "weapon": 1, "ammo": 12},
+    {"p": [-0.06, 2.38], "weapon": 1, "ammo": 12},
+    {"p": [1.1, 2.55], "weapon": 2, "ammo": 4},
+    {"p": [-0.3, 3.25], "weapon": 5, "ammo": 40},
+    {"p": [0.9, 2.85], "weapon": 5, "ammo": 40},
+    {"p": [-0.56, 2.77], "weapon": 0},
+    {"p": [0.56, 2.77], "weapon": 0}
+  ],
+  "blocks": [
+    {"rect": [-1.46, 3.1, -0.96, 3.43], "height": 0.25, "style": "microwave", "facing": "-z"},
+    {"rect": [1.29, 3.17, 1.66, 3.43], "height": 0.25, "style": "toaster", "facing": "-z"},
+    {"rect": [-0.45, 2.7, -0.23, 2.92], "height": 0.25, "style": "steel"},
+    {"rect": [0.34, 2.45, 0.58, 2.64], "height": 0.25, "style": "steel"}
+  ],
+  "decks": [
+    {"rect": [1.25, 3.16, 1.76, 3.61], "height": 0.28, "style": "metal"}
+  ],
+  "ramps": [
+    {"rect": [0.55, 3.45, 1.25, 3.61], "base": 0, "height": 0.28, "rise": "+x"},
+    {"rect": [1.55, 2.46, 1.75, 3.16], "base": 0, "height": 0.28, "rise": "+z"}
+  ],
+  "props": [
+    {"kind": "turret", "p": [1.47, 3.22], "base": 0.2975, "yaw": 0},
+    {"kind": "bowl", "p": [1.2, 2.75], "base": 0, "yaw": 0}
+  ],
+  "zones": []
+}

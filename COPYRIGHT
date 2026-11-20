@@ -1,0 +1,18 @@
+Hotdog Simulator
+Copyright (C) 2026 David Nunes-Childs
+
+Original source code, shaders, maps, procedurally made models, characters
+and textures, gameplay and synthesised sounds are licensed under the
+GNU General Public License, version 3 only (GPL-3.0-only). See LICENSE.
+There is no warranty. The complete corresponding source code is published
+in the project's public repository: HOW-TO-RUN.txt and
+THIRD_PARTY_LICENSES.html (in every package) give its address and say which
+commit a build was made from.
+
+This is a copyleft license. Copyright is retained; this project is not
+dedicated to the public domain and does not use a permissive project license.
+
+Third-party libraries, fonts, lookup tables and recordings keep their own
+copyright and licenses. They are not relicensed by this notice. See
+THIRD_PARTY_LICENSES.html (every one, with its licence text),
+THIRD_PARTY_NOTICES.md and assets/CHARACTER_CREDITS.md.

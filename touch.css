@@ -1,0 +1,122 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (C) 2026 David Nunes-Childs */
+/* Touch controls (touch.js): the stick, the buttons and their menu, in the colours of the head-up display and the
+   lobby panel. The overlay never takes a pointer event itself (touch.js reads touches on the whole window), so a mouse
+   still reaches the game. html.touch-on is set while the controls are showing, html[data-touch] says which set. */
+
+/* No scrolling, zooming, selecting or long-press menus while the controls are showing; text boxes still take text. */
+html.touch-on,html.touch-on body,html.touch-on #game{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+html.touch-on input,html.touch-on textarea{-webkit-user-select:text;user-select:text}
+/* iOS zooms into a text box whose type is under 16 px. */
+html.touch-on .chat-form input,html.touch-on .lobby-row input[type=text]{font-size:16px}
+/* The lobby by thumb: its panel scrolls, its targets are bigger, and Enter is the Chat button. */
+html.touch-on .lobby{touch-action:pan-y;-webkit-overflow-scrolling:touch}
+html.touch-on .lobby .colour{width:36px;height:36px}
+html.touch-on .lobby .team{min-height:36px}
+html.touch-on .lobby-voice button{min-height:38px}
+html.touch-on .lobby .hint,html.touch-on .chat-hint{display:none}
+html.touch-on .chat-log{pointer-events:none}
+html.touch-on .chat.open .chat-log{pointer-events:auto;touch-action:pan-y}
+/* The chat: in a round, beside the guns on the left, clear of the buttons; in the lobby, top right, clear of the panel. */
+html.touch-on .chat{left:calc(var(--touch-l) + 52px);right:auto;top:calc(var(--touch-t) + 192px);bottom:auto;width:min(300px,40vw)}
+html.touch-on .chat-log{max-height:min(24vh,120px)}
+html[data-touch=lobby] .chat,html[data-touch=table] .chat,html[data-touch=off].touch-on .chat{left:auto;right:var(--touch-r);top:calc(var(--touch-t) + 56px)}
+/* Typing: the box goes to the top of the screen, where the on-screen keyboard leaves it in sight, with the lines under it. */
+html.touch-on .chat.open{z-index:7;left:50%;right:auto;top:calc(var(--touch-t) + 8px);transform:translateX(-50%);width:min(440px,calc(100% - 24px))}
+html.touch-on .chat.open .chat-form{order:-1}
+html.touch-on .chat.open .chat-log{max-height:min(30vh,140px)}
+/* The links to the other modes and the frame-rate line sit where the buttons are. */
+html[data-touch=play] .modes,html[data-touch=dead] .modes,html[data-touch=table] .modes{display:none}
+html[data-touch=play] .fps,html[data-touch=dead] .fps{right:auto;left:50%;transform:translateX(-50%);bottom:auto;top:calc(var(--touch-t) + 2px);max-width:calc(100% - 16px);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;opacity:.7}
+/* With the menu open the controls are put away, and the links (and the Graphics choice among them) come back, under it. */
+html.touch-menu-open .touch{visibility:hidden}
+html.touch-menu-open .modes{display:flex;position:fixed;z-index:6;left:50%;right:auto;transform:translateX(-50%);bottom:calc(var(--touch-b) + 6px);flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100% - 24px)}
+
+:root{--touch-l:max(14px,env(safe-area-inset-left));--touch-r:max(14px,env(safe-area-inset-right));--touch-b:max(10px,env(safe-area-inset-bottom));--touch-t:max(0px,env(safe-area-inset-top))}
+.touch{position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden;font:650 10px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#eef6f1;--l:var(--touch-l);--r:var(--touch-r);--b:var(--touch-b);--t:var(--touch-t)}
+.touch[hidden],.touch .tb[hidden],.touch-bar[hidden],.touch-menu[hidden],.touch-show[hidden],.touch-chat[hidden]{display:none}
+
+/* The stick: where the left thumb rests, faint; under the thumb, with the knob as far as it is pushed. */
+.touch-stick{position:absolute;left:calc(var(--l) + 62px);bottom:calc(var(--b) + 96px);width:128px;height:128px;border-radius:50%;border:1.5px solid #c7f0e340;background:radial-gradient(circle,#0d1b1b30 0 55%,#0d1b1b66 70%,#0d1b1b40);opacity:.55;transition:opacity .15s}
+.touch-stick.held{opacity:1;transition:none}
+.touch-knob{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;background:#c7f0e355;border:1.5px solid #e9fbf3aa;box-shadow:0 2px 10px #0006}
+.touch-stick.held .touch-knob{background:#dfb97b99;border-color:#efcd98}
+.touch[data-mode=lobby] .touch-stick,.touch[data-mode=dead] .touch-stick,.touch[data-mode=over] .touch-stick,.touch[data-mode=table] .touch-stick{display:none}
+
+/* The buttons: round, translucent, the label in the display's lettering and the key it stands for under it. */
+.tb{position:absolute;--s:56px;width:var(--s);height:var(--s);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border-radius:50%;background:#0d1b1b8f;border:1.5px solid #c7f0e366;box-shadow:0 2px 12px #0005;text-shadow:0 1px 2px #000;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.tb b{font-weight:650;line-height:1}
+.tb i{font:500 8px ui-monospace,monospace;letter-spacing:.08em;font-style:normal;color:#b6d6cb;opacity:.85}
+.tb i:empty{display:none}
+.tb.on{border-color:#dfb97b;box-shadow:0 0 0 2px #dfb97b55,0 2px 12px #0005;color:#f6dfb2}
+.tb.dim{opacity:.5}
+.tb.down{background:#dfb97bd0;border-color:#f3d7a2;color:#172321;text-shadow:none;opacity:1}
+.tb.down i{color:#172321}
+.tb.wide{width:auto;min-width:96px;height:44px;padding:0 16px;border-radius:22px}
+/* Landscape. The display keeps the top (bars, score line, the alert banner across the middle), the crosshair in the
+   middle and the weapons line along the bottom left; the controls keep out of them. The trigger is under the right thumb
+   with jump, melee and stim round its outside, the stances under it and what can be picked up beside it; the guns are a
+   column on the left under the menu button. */
+.tb-fire{--s:94px;right:calc(var(--r) + 78px);bottom:calc(var(--b) + 46px);background:#3a1d0f99;border:2px solid #dfb97bbb;font-size:13px}
+.tb-fire.down{background:#e2662fd9;border-color:#ffc58f;color:#fff8ee;text-shadow:0 1px 2px #0008}
+.tb-jump{--s:68px;right:var(--r);bottom:calc(var(--b) + 4px);font-size:11px}
+.tb-melee{--s:54px;right:calc(var(--r) + 6px);bottom:calc(var(--b) + 84px)}
+.tb-stim{--s:46px;right:calc(var(--r) + 10px);bottom:calc(var(--b) + 150px)}
+.tb-scope{--s:52px;right:calc(var(--r) + 99px);bottom:calc(var(--b) + 150px)}
+.tb-crouch{--s:52px;right:calc(var(--r) + 172px);bottom:calc(var(--b) + 4px)}
+.tb-prone{--s:52px;right:calc(var(--r) + 232px);bottom:calc(var(--b) + 4px)}
+.tb-use{right:calc(var(--r) + 178px);bottom:calc(var(--b) + 64px)}
+.tb-carry{right:calc(var(--r) + 178px);bottom:calc(var(--b) + 116px)}
+.tb-primary,.tb-secondary,.tb-swap{--s:40px;width:40px;height:36px;border-radius:10px;left:var(--l);font-size:12px}
+.tb-primary{top:calc(var(--t) + 162px)}.tb-secondary{top:calc(var(--t) + 204px)}.tb-swap{top:calc(var(--t) + 246px);font-size:8px}
+.tb-ready{right:var(--r);top:calc(var(--t) + 120px);min-width:84px;padding:0 10px;font-size:11px}
+.tb-hints.wide{right:var(--r);top:calc(var(--t) + 172px);min-width:72px;height:30px;padding:0 10px;font-size:10px}
+.tb-round{left:50%;transform:translateX(-50%);bottom:calc(var(--b) + 84px);min-width:170px;height:52px;font-size:13px;border-color:#dfb97b}
+.touch[data-mode=dead] .tb-jump{right:calc(var(--r) + 40px);bottom:calc(var(--b) + 84px);min-width:130px;height:52px;font-size:13px}
+/* The card table: Flip under the right thumb and Stop under the left, far apart (a flip by mistake can ruin a hand), both
+   clear of the cards along the bottom and of the scoreboard top left. */
+.touch[data-mode=table] .tb-fire{--s:96px;right:calc(var(--r) + 24px);bottom:calc(var(--b) + 150px)}
+.touch[data-mode=table] .tb-scope{--s:76px;right:auto;left:calc(var(--l) + 24px);bottom:calc(var(--b) + 56px);font-size:12px}
+
+/* The menu button: top left under the display's score line; in the lobby and at the card table (with Chat), top right. */
+.touch-bar{position:fixed;z-index:4;left:var(--touch-l);top:calc(var(--touch-t) + 118px);display:flex;gap:8px}
+html[data-touch=lobby] .touch-bar,html[data-touch=table] .touch-bar,html[data-touch-view=lobby] .touch-show,html[data-touch-view=table] .touch-show{left:auto;right:var(--touch-r);top:calc(var(--touch-t) + 10px)}
+.touch-bar button,.touch-show{min-width:40px;height:36px;padding:0 12px;border:1px solid #9fc6b355;border-radius:18px;background:#0d1b1bc4;color:#f4f1df;font:600 13px system-ui,sans-serif;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);touch-action:manipulation}
+.touch-bar .touch-chat{font:600 11px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase}
+.touch-show{position:fixed;z-index:4;left:var(--touch-l);top:calc(var(--touch-t) + 118px);font:600 11px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase}
+.touch-menu{position:fixed;z-index:6;left:50%;top:50%;transform:translate(-50%,-50%);width:min(340px,calc(100vw - 32px));max-height:calc(100% - 24px);overflow:auto;padding:16px 20px 14px;background:#0d1b1bf0;border:1px solid #9fc6b333;border-radius:9px;box-shadow:0 8px 30px #0006;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#f4f1df;font:13px system-ui,sans-serif;touch-action:pan-y}
+.touch-menu .eyebrow{margin:0 0 10px}
+.touch-row{display:grid;grid-template-columns:auto 1fr 32px;align-items:center;gap:10px;margin:0 0 12px;font-size:12px;color:#9eafa5}
+.touch-row input{width:100%;height:32px;margin:0;accent-color:#dfb97b}.touch-row output{font:12px ui-monospace,monospace;color:#f4f1df;text-align:right}
+.touch-menu button{display:block;width:100%;min-height:44px;margin:0 0 8px;border:1px solid #9fc6b355;border-radius:5px;background:#16302c;color:#f4f1df;font:600 12px system-ui,sans-serif}
+.touch-menu button.touch-menu-chat{background:#285a48}.touch-menu button[hidden]{display:none}
+.touch-menu button.touch-close{background:#dfb97b;border:0;color:#172321}
+.touch-menu .hint{margin:4px 0 0;text-align:left;line-height:1.5}
+
+/* Portrait: the same controls, a little smaller and lower, and a word about turning the phone. */
+.touch-turn{display:none;position:absolute;left:50%;top:calc(var(--t) + 40%);transform:translateX(-50%);width:min(280px,80vw);margin:0;padding:9px 14px;border-radius:9px;background:#0d1b1bc4;border:1px solid #9fc6b333;text-align:center;line-height:1.5;color:#dfd7bc;animation:touch-fade 6s forwards}
+@keyframes touch-fade{0%,75%{opacity:1}100%{opacity:0}}
+@media (orientation:portrait){
+ /* The lobby: the menu button and the chat under the header, above the panel. */
+ html[data-touch=lobby] .touch-bar{top:calc(var(--touch-t) + 138px)}
+ html[data-touch=lobby] .chat:not(.open){left:var(--touch-l);right:calc(var(--touch-r) + 116px);width:auto;top:calc(var(--touch-t) + 138px)}
+ html[data-touch=lobby] .lobby{max-height:calc(100% - 300px)}
+ /* The display's weapons line takes the bottom of a tall screen: the controls stand above it. */
+ .touch[data-mode=play] .touch-turn{display:block}
+ .touch-stick{left:calc(var(--l) + 8px);bottom:calc(var(--b) + 130px);width:116px;height:116px}
+ .tb-jump{--s:62px;right:var(--r);bottom:calc(var(--b) + 130px)}
+ .tb-crouch{--s:48px;right:calc(var(--r) + 76px);bottom:calc(var(--b) + 128px)}
+ .tb-prone{--s:48px;right:calc(var(--r) + 132px);bottom:calc(var(--b) + 128px)}
+ .tb-fire{--s:84px;right:calc(var(--r) + 66px);bottom:calc(var(--b) + 194px)}
+ .tb-melee{--s:50px;right:calc(var(--r) + 4px);bottom:calc(var(--b) + 204px)}
+ .tb-stim{--s:46px;right:calc(var(--r) + 6px);bottom:calc(var(--b) + 266px)}
+ .tb-scope{--s:50px;right:calc(var(--r) + 82px);bottom:calc(var(--b) + 290px)}
+ .tb-use{right:auto;left:var(--l);bottom:calc(var(--b) + 262px)}
+ .tb-carry{right:auto;left:var(--l);bottom:calc(var(--b) + 314px)}
+ .tb-ready{top:calc(var(--t) + 236px)}
+ .tb-hints.wide{top:calc(var(--t) + 286px)}
+ .tb-round,.touch[data-mode=dead] .tb-jump{bottom:calc(var(--b) + 200px)}
+ /* The card table: above the cards along the bottom. */
+ .touch[data-mode=table] .tb-fire{--s:88px;right:calc(var(--r) + 16px);bottom:calc(var(--b) + 200px)}
+ .touch[data-mode=table] .tb-scope{--s:72px;left:calc(var(--l) + 16px);bottom:calc(var(--b) + 208px)}
+}

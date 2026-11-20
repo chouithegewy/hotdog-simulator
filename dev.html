@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sandbox links · Hotdog Simulator</title>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- Copyright (C) 2026 David Nunes-Childs -->
+<!-- The sandbox link composer, for developers: choose a server and a game, and open the address it makes. The game server
+     serves it at /dev.html; the sums are devlink.js. -->
+<style>
+:root{color-scheme:dark;--bg:#020304;--card:#0d1b1be8;--line:#9fc6b333;--edge:#9fc6b355;--text:#f4f1df;--soft:#d5d6c9;--muted:#9eafa5;--eyebrow:#b6d6cb;--gold:#dfb97b;--gold-hi:#efcd98;--field:#07100fcc;--btn:#16302c;--btn-hi:#1d3f3a;--on:#285a48}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}
+body{min-height:100vh;background:radial-gradient(900px 520px at 85% -8%,#123029 0,transparent 62%),radial-gradient(700px 420px at -10% 110%,#2a1c0c 0,transparent 60%),var(--bg)}
+main{max-width:1100px;margin:0 auto;padding:22px 16px 40px}
+.eyebrow{margin:0;color:var(--eyebrow);font:10px ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase}
+header{margin:0 0 16px}header h1{font-size:22px;font-weight:600;margin:6px 0 4px}header p{margin:0;color:var(--soft);max-width:62ch}
+code,kbd{font:12px ui-monospace,monospace;color:var(--gold)}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px;align-items:start}
+.side{position:sticky;top:14px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:14px 16px 16px;box-shadow:0 8px 30px #0004}
+.form{display:flex;flex-direction:column;gap:12px}
+.card>h2{margin:0 0 10px}
+.row{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;align-items:center;margin:0 0 10px}.row:last-child{margin-bottom:0}
+.row>span,.row>label{color:var(--muted);font-size:12px}
+input[type=text],input[type=number],select,textarea{min-height:36px;padding:6px 10px;border:1px solid var(--edge);border-radius:5px;background:var(--field);color:var(--text);font:550 14px system-ui,sans-serif;min-width:0}
+select option{background:#0d1b1b;color:var(--text)}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,.seg label:has(input:focus-visible),.tick:has(input:focus-visible){outline:2px solid #fff;outline-offset:2px}
+.inline{display:flex;gap:8px;min-width:0}.inline>*{flex:1}.inline>input[type=number]{flex:0 0 110px}
+/* A choice of one: radio buttons drawn as a row of buttons. */
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{position:relative;flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--edge);border-radius:5px;background:var(--btn);color:var(--text);font:600 12px system-ui,sans-serif;cursor:pointer;white-space:nowrap;user-select:none}
+.seg label:hover{background:var(--btn-hi)}.seg label:has(input:checked){background:var(--on);box-shadow:0 0 0 2px var(--gold)}
+.seg input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.seg code{font-size:11px;color:var(--eyebrow)}
+/* Switches: a box each, the whole box a target. */
+.ticks{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px}
+.tick{display:flex;align-items:center;gap:9px;min-height:40px;padding:6px 10px;border:1px solid var(--edge);border-radius:5px;background:var(--btn);cursor:pointer;user-select:none}
+.tick:hover{background:var(--btn-hi)}.tick:has(input:checked){border-color:var(--gold);background:#2a2a1a}
+.tick input{width:18px;height:18px;margin:0;accent-color:var(--gold);flex:none}
+.tick b{font-weight:550}.tick small{display:block;color:var(--muted);font:11px ui-monospace,monospace}
+.tick.all{grid-column:1/-1}
+.ticks.every .tick:not(.all){opacity:.45;pointer-events:none}
+.big{margin:0 0 12px}.big b{font-size:15px}
+fieldset{border:0;margin:0;padding:0;min-width:0;display:flex;flex-direction:column;gap:12px}
+fieldset:disabled .card{opacity:.45}
+fieldset:disabled .card .tick,fieldset:disabled .seg label{cursor:default}
+.hint{margin:8px 0 0;color:var(--muted);font-size:12px}
+/* The link and what to do with it. */
+.link textarea{display:block;width:100%;resize:none;min-height:0;font:13px/1.45 ui-monospace,monospace;color:var(--gold-hi);field-sizing:content;max-height:9em;word-break:break-all}
+.actions{display:flex;gap:8px;margin:10px 0 0}
+.actions button{flex:1 1 auto;min-height:42px;padding:0 12px;border:1px solid var(--edge);border-radius:5px;background:var(--btn);color:var(--text);font:600 13px system-ui,sans-serif;white-space:nowrap;cursor:pointer}
+.actions button:hover{background:var(--btn-hi)}
+.actions .go{background:var(--gold);color:#172321;border-color:var(--gold)}.actions .go:hover{background:var(--gold-hi)}
+.said{min-height:1.4em;margin:8px 0 0;color:var(--muted);font:12px ui-monospace,monospace}
+.status{display:flex;align-items:baseline;gap:8px;margin:10px 0 0;font:12px ui-monospace,monospace;color:var(--soft)}
+.status::before{content:'';flex:none;width:8px;height:8px;border-radius:50%;background:#56645f;transform:translateY(-1px)}
+.status.up::before{background:#5fd27a;box-shadow:0 0 8px #5fd27a88}
+/* The quick links: each server, a row of links. */
+.quick{display:flex;flex-direction:column;gap:10px}
+.quick-row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;align-items:start}
+.quick-row b{font:600 13px ui-monospace,monospace;color:var(--text);line-height:30px}.quick-row b i{display:block;font:10px ui-monospace,monospace;color:var(--muted);font-style:normal;line-height:1.2;letter-spacing:.08em;text-transform:uppercase}
+.quick-links{display:flex;flex-wrap:wrap;gap:6px}
+.quick-links a{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border:1px solid var(--edge);border-radius:15px;color:var(--gold);text-decoration:none;font-size:12px;background:#0a161bd9}
+.quick-links a:hover{background:#284344;color:var(--gold-hi)}
+@media (max-width:860px){
+ .cols{display:flex;flex-direction:column;align-items:stretch}.side{display:contents}
+ /* On a narrow screen the link stays in sight at the top while the choices scroll under it. */
+ .link{order:-1;position:sticky;top:0;z-index:2;margin:0 -16px;border-radius:0 0 9px 9px;border-top:0;background:#0d1b1bf5;backdrop-filter:blur(8px);padding:10px 16px 12px}
+ .link h2{display:none}.link textarea{max-height:4.5em;font-size:12px}.link .actions button{min-height:40px}.link .said{display:none}
+ .quick-card{order:1}
+}
+@media (max-width:420px){.row{grid-template-columns:1fr;gap:6px}.ticks{grid-template-columns:1fr 1fr}.tick small{display:none}.quick-row{grid-template-columns:1fr}.quick-row b{line-height:1.3}}
+</style>
+</head>
+<body>
+<main>
+<header><p class="eyebrow">Hotdog simulator · for developers</p><h1>Sandbox links</h1><p>Choose a server and a game; the address below follows. A sandbox has the tuning panel (F2 or the Tune button in the game) and the guns, bots and rules chosen here.</p></header>
+<form id="form" class="cols" autocomplete="off" onsubmit="return false">
+ <div class="form">
+  <section class="card" aria-labelledby="h-server">
+   <h2 class="eyebrow" id="h-server">Server</h2>
+   <div class="row"><label for="host">Host</label><input id="host" name="host" type="text" spellcheck="false" autocapitalize="off" inputmode="url"></div>
+   <div class="row"><label for="port">Port</label><div class="inline"><select id="port" name="port"></select><input id="port-other" name="portOther" type="number" min="1" max="65535" placeholder="port" aria-label="Other port" hidden></div></div>
+   <div class="row"><span>Play</span><div class="seg" role="radiogroup" aria-label="Online or offline"><label><input type="radio" name="online" value="mp" checked>Online <code>?mp</code></label><label><input type="radio" name="online" value="play">Offline <code>?play</code></label></div></div>
+   <p class="status" id="status" role="status">status unavailable</p>
+  </section>
+  <section class="card" aria-labelledby="h-game">
+   <h2 class="eyebrow" id="h-game">Game</h2>
+   <label class="tick big"><input type="checkbox" name="sandbox" checked><span><b>Sandbox</b><small>sandbox · the tuning panel and the choices below</small></span></label>
+   <div class="row"><span>Mode</span><div class="seg" role="radiogroup" aria-label="Mode" id="modes"><label><input type="radio" name="mode" value="" checked>Default</label></div></div>
+   <div class="row"><label for="map">Map</label><select id="map" name="map"><option value="">(default for mode)</option></select></div>
+  </section>
+  <fieldset id="sandboxed">
+   <section class="card" aria-labelledby="h-guns">
+    <h2 class="eyebrow" id="h-guns">Guns</h2>
+    <div class="ticks" id="guns"><label class="tick all"><input type="checkbox" name="all"><span><b>Every gun</b><small>weapons=all</small></span></label></div>
+    <p class="hint">None ticked: the mode's own guns.</p>
+   </section>
+   <section class="card" aria-labelledby="h-rules">
+    <h2 class="eyebrow" id="h-rules">Rules</h2>
+    <div class="ticks">
+     <label class="tick"><input type="checkbox" name="ammo"><span><b>Unlimited ammo</b><small>ammo=inf</small></span></label>
+     <label class="tick"><input type="checkbox" name="god"><span><b>God mode</b><small>god</small></span></label>
+     <label class="tick"><input type="checkbox" name="stim"><span><b>Unlimited stim</b><small>stim=inf</small></span></label>
+     <label class="tick"><input type="checkbox" name="zombies"><span><b>Zombies</b><small>zombies=on · off in a sandbox</small></span></label>
+     <label class="tick"><input type="checkbox" name="field"><span><b>Forcefield stays up</b><small>field=on · Forts</small></span></label>
+    </div>
+   </section>
+   <section class="card" aria-labelledby="h-bots">
+    <h2 class="eyebrow" id="h-bots">Bots and respawning</h2>
+    <div class="row"><label for="bots">Bots</label><select id="bots" name="bots"><option value="">Default</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+    <div class="row"><span>Bots do</span><div class="seg" role="radiogroup" aria-label="What the bots do"><label><input type="radio" name="botmode" value="idle">Stand still</label><label><input type="radio" name="botmode" value="walk">Walk</label><label><input type="radio" name="botmode" value="fight" checked>Fight</label></div></div>
+    <div class="row"><span>Respawn</span><div class="seg" role="radiogroup" aria-label="Where you respawn"><label><input type="radio" name="respawn" value="start" checked>At the start</label><label><input type="radio" name="respawn" value="here">Where you were</label></div></div>
+   </section>
+  </fieldset>
+  <section class="card" aria-labelledby="h-extras">
+   <h2 class="eyebrow" id="h-extras">Extras</h2>
+   <div class="ticks">
+    <label class="tick"><input type="checkbox" name="check"><span><b>Check</b><small>check</small></span></label>
+    <label class="tick"><input type="checkbox" name="webgl2"><span><b>WebGL 2</b><small>webgl2 · not WebGPU</small></span></label>
+   </div>
+  </section>
+ </div>
+ <div class="side">
+  <section class="card link" aria-labelledby="h-link">
+   <h2 class="eyebrow" id="h-link">Link</h2>
+   <textarea id="link" rows="2" readonly aria-label="The link" spellcheck="false"></textarea>
+   <div class="actions"><button type="button" class="go" id="open">Open</button><button type="button" id="tab">Open in new tab</button><button type="button" id="copy">Copy</button></div>
+   <p class="said" id="said" role="status"></p>
+  </section>
+  <section class="card quick-card" aria-labelledby="h-quick">
+   <h2 class="eyebrow" id="h-quick">Quick links</h2>
+   <div class="quick" id="quick"></div>
+  </section>
+ </div>
+</form>
+</main>
+<script type="module">
+import {compose,WEAPONS,MODES,CARDS_MAP,PORTS,QUICK,BOTMODES,RESPAWNS} from './devlink.js';
+const $=id=>document.getElementById(id),form=$('form'),e=form.elements;
+const MODE_NAME=Object.fromEntries(MODES);
+// ----- The controls the lists make: the ports, the modes, the guns.
+for(const [port,name] of PORTS)$('port').append(new Option(`${port} · ${name}`,String(port)));$('port').append(new Option('Other…','other'));
+for(const [mode,name] of MODES){const l=document.createElement('label'),i=document.createElement('input');i.type='radio';i.name='mode';i.value=mode;l.append(i,name);$('modes').append(l)}
+for(const w of WEAPONS){const l=document.createElement('label'),i=document.createElement('input'),s=document.createElement('span'),b=document.createElement('b'),k=document.createElement('small');l.className='tick';i.type='checkbox';i.name=`w-${w.name}`;b.textContent=w.title;k.textContent=`${w.id} · ${w.name}`;s.append(b,k);l.append(i,s);$('guns').append(l)}
+
+// ----- What was chosen last time (the game's choices; the server is this page's own unless changed).
+const KEY='hotdog.dev',remembered=(()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')??{}}catch{return {}}})();
+e.host.value=location.hostname||'localhost';
+const here=Number(location.port);if(PORTS.some(([p])=>p===here))e.port.value=String(here);else if(here){e.port.value='other';e.portOther.value=String(here)}else e.port.value='8137';
+const set=(name,value)=>{const el=e[name];if(!el||value==null)return;if(el instanceof RadioNodeList)el.value=String(value);else if(el.type==='checkbox')el.checked=!!value;else el.value=String(value)};
+for(const name of ['online','sandbox','mode','bots','botmode','respawn','ammo','god','stim','zombies','field','check','webgl2','all'])set(name,remembered[name]);
+for(const w of WEAPONS)set(`w-${w.name}`,remembered.weapons?.includes(w.name));
+let wantedMap=remembered.map??'';
+
+/** The choices on the page, as compose() takes them. */
+function choices(){return {host:e.host.value,port:e.port.value==='other'?e.portOther.value:e.port.value,online:e.online.value!=='play',sandbox:e.sandbox.checked,mode:e.mode.value,map:e.map.value,
+ weapons:e.all.checked?'all':WEAPONS.filter(w=>e[`w-${w.name}`].checked).map(w=>w.name),ammo:e.ammo.checked,god:e.god.checked,bots:e.bots.value,botmode:BOTMODES.includes(e.botmode.value)?e.botmode.value:'fight',
+ zombies:e.zombies.checked,field:e.field.checked,stim:e.stim.checked,respawn:RESPAWNS.includes(e.respawn.value)?e.respawn.value:'start',check:e.check.checked,webgl2:e.webgl2.checked}}
+
+// ----- The maps: the server's list, each with its mode once its file has been read; a mode shows its own, Free For All every one, Fully Loaded Counter Siege alone.
+let maps=[];
+const slug=t=>String(t).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+function fillMaps(){const mode=e.mode.value,box=e.map,keep=box.options.length>1?box.value:wantedMap;
+ const shown=maps.filter(m=>mode==='cards'?m.file===CARDS_MAP:mode===''||mode==='ffa'||!m.mode||m.mode===mode);
+ box.replaceChildren(new Option('(default for mode)',''),...shown.map(m=>new Option(`${m.name}${slug(m.name)!==m.file?` (${m.file})`:''}${m.mode?` · ${MODE_NAME[m.mode]??m.mode}`:''}`,m.file)));
+ box.value=shown.some(m=>m.file===keep)?keep:''}
+fetch('assets/maps/').then(r=>r.ok?r.json():[]).then(async list=>{
+ maps=(Array.isArray(list)?list:[]).map(m=>({file:String(m.file??'').replace(/\.json$/,''),name:String(m.name??m.file??'')})).filter(m=>/^[\w-]+$/.test(m.file));fillMaps();update();
+ await Promise.all(maps.map(m=>fetch(`assets/maps/${m.file}.json`).then(r=>r.ok?r.json():null).then(j=>{if(j&&typeof j.mode==='string')m.mode=j.mode}).catch(()=>{})));fillMaps();update()}).catch(()=>{});
+
+// ----- The link, the server's status, the quick links.
+const said=$('said');let saidTimer=0;const say=text=>{said.textContent=text;clearTimeout(saidTimer);saidTimer=setTimeout(()=>said.textContent='',4000)};
+async function copy(text){
+ try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return true}}catch{}
+ // A plain-http page has no clipboard API: the old way, through a selected text box.
+ const area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';document.body.append(area);area.select();area.setSelectionRange(0,text.length);
+ let ok=false;try{ok=document.execCommand('copy')}catch{}area.remove();return ok}
+function update(){const o=choices(),link=compose({...o,protocol:'http:'});
+ $('link').value=link;$('port-other').hidden=e.port.value!=='other';$('sandboxed').disabled=!o.sandbox;$('guns').classList.toggle('every',e.all.checked);
+ try{localStorage.setItem(KEY,JSON.stringify({...o,host:undefined,port:undefined,all:e.all.checked,weapons:WEAPONS.filter(w=>e[`w-${w.name}`].checked).map(w=>w.name),map:o.map||wantedMap}))}catch{}
+ quick(o)}
+let quickKey='';
+function quick(o){const key=JSON.stringify([o.host]);if(key===quickKey)return;quickKey=key;
+ $('quick').replaceChildren(...PORTS.map(([port,name])=>{const row=document.createElement('div'),head=document.createElement('b'),tag=document.createElement('i'),links=document.createElement('div');row.className='quick-row';links.className='quick-links';
+  head.textContent=String(port);tag.textContent=name;head.append(tag);
+  for(const q of QUICK){const a=document.createElement('a');a.href=compose({host:o.host,port,...q.options});a.textContent=q.label;a.title=`${q.title}\n${a.href}`;links.append(a)}
+  row.append(head,links);return row}))}
+let asking=0,statusTimer=0;
+async function status(){const ask=++asking,o=choices(),line=$('status'),origin=new URL(compose(o)).origin;
+ try{const control=new AbortController,timer=setTimeout(()=>control.abort(),2500),r=await fetch(`${origin}/status`,{signal:control.signal,cache:'no-store'});clearTimeout(timer);if(!r.ok)throw new Error(r.status);
+  const s=await r.json();if(ask!==asking)return;
+  const rules=s.rules==null?'':typeof s.rules==='string'?s.rules:Array.isArray(s.rules)?s.rules.join(' '):typeof s.rules==='object'?Object.entries(s.rules).filter(([,v])=>v!=null&&v!==false).map(([k,v])=>v===true?k:`${k}=${v}`).join(' '):String(s.rules);
+  const parts=[s.map,MODE_NAME[s.mode]??s.mode,s.stage,s.humans!=null?`${s.humans} human${s.humans===1?'':'s'}`:'',s.players!=null?`${s.players} player${s.players===1?'':'s'}`:'',s.dev?'dev':'',rules].filter(x=>x!=null&&x!=='');
+  line.textContent=`${origin.replace(/^https?:\/\//,'')} · ${parts.join(' · ')||'up'}`;line.classList.add('up')}
+ catch{if(ask!==asking)return;line.textContent=`${origin.replace(/^https?:\/\//,'')} · status unavailable`;line.classList.remove('up')}}
+const soon=()=>{clearTimeout(statusTimer);statusTimer=setTimeout(status,350)};
+form.addEventListener('input',event=>{if(event.target===e.mode||event.target.name==='mode')fillMaps();if(event.target===e.map)wantedMap=e.map.value;update();if(['host','port','portOther'].includes(event.target.name))soon()});
+form.addEventListener('change',event=>{if(event.target.name==='mode')fillMaps();if(event.target===e.map)wantedMap=e.map.value;update();if(['host','port','portOther'].includes(event.target.name))soon()});
+$('open').addEventListener('click',()=>location.assign($('link').value));
+$('tab').addEventListener('click',()=>window.open($('link').value,'_blank','noopener'));
+$('copy').addEventListener('click',async()=>{const link=$('link').value;say(await copy(link)?'Copied':'Select the link and copy it');if(!said.offsetParent){const b=$('copy');b.textContent=said.textContent;setTimeout(()=>b.textContent='Copy',1600)}});
+$('link').addEventListener('focus',event=>event.target.select());
+fillMaps();update();status();setInterval(()=>{if(!document.hidden)status()},5000);
+</script>
+</body>
+</html>

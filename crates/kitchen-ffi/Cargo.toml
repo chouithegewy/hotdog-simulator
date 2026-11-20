@@ -1,0 +1,31 @@
+[package]
+name = "kitchen-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["David Nunes-Childs"]
+description = "A stable C interface to kitchen-sim, Hotdog Simulator's shared simulation, for clients written in other languages (the Unreal client)."
+
+# A package of its own, with its own lock file and target directory (crates/kitchen-ffi/target), as crates/server is:
+# building it never touches the game client's dependency tree. tools/build-ffi.sh builds it and regenerates the header.
+
+[lib]
+name = "kitchen_ffi"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+kitchen-sim = { path = "../kitchen-sim" }
+glam = "0.32.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Panics must unwind so that `catch_unwind` can stop them at the C boundary (never `panic = "abort"`).
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "unwind"
+
+[profile.dev]
+panic = "unwind"
