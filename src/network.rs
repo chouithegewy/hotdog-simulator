@@ -228,6 +228,11 @@ impl Network {
         out
     }
 }
+/// Whether the client waits for a replay's file: connected to a replay (`runtime::REPLAY`) whose stream has not been
+/// handed over yet.
+pub fn waiting_for_replay(connect: &str, stream: bool) -> bool {
+    connect == crate::runtime::REPLAY && !stream
+}
 /// Before the arena's tick: whatever the server has said since the last frame.
 pub fn receive(world: &mut World) {
     let options = world.resource::<crate::runtime::Options>().clone();
@@ -236,6 +241,11 @@ pub fn receive(world: &mut World) {
     }
     let now = world.resource::<Time<Real>>().elapsed_secs_f64();
     world.resource_scope(|world, mut net: Mut<Network>| {
+        // A replay's stream is handed over once its file has come (in a browser some time after the first frame): until
+        // then there is nothing to read, and no server to open a socket to (`replay:` is no address).
+        if waiting_for_replay(&options.connect, net.replay.is_some()) {
+            return;
+        }
         if !net.started {
             // A client without a page says here what it wants to be called and painted; the server checks it.
             let mut join = serde_json::json!({"type": "join", "version": net::PROTOCOL});
@@ -567,6 +577,22 @@ pub(crate) mod tests {
             Incoming::Text(s) => s,
             Incoming::Binary(_) => panic!("a binary message"),
         }
+    }
+    /// A replay's viewer opens no socket while its file is on its way (in a browser `replay:` is no WebSocket address:
+    /// the page logged an error for it), and reads the stream once it is there; a server's address is never held up.
+    #[test]
+    fn a_replay_waits_for_its_file_and_never_opens_a_socket() {
+        assert!(waiting_for_replay(crate::runtime::REPLAY, false));
+        assert!(!waiting_for_replay(crate::runtime::REPLAY, true));
+        assert!(!waiting_for_replay("ws://127.0.0.1:8137/ws", false));
+        assert!(!waiting_for_replay("", false));
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.insert_resource(crate::runtime::Options { connect: crate::runtime::REPLAY.into(), ..Default::default() });
+        app.init_resource::<Network>().init_resource::<Time<Real>>();
+        app.world_mut().run_system_once(receive).unwrap();
+        let net = app.world().resource::<Network>();
+        assert!(!net.started && net.outgoing.is_none(), "no socket before the file");
     }
     /// The native client joins over the server's WebSocket at /ws, hears what it is sent (text and frames), and sends
     /// what the game gives it (text and commands); when the server closes the socket, it says so.

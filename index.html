@@ -44,6 +44,13 @@ html.touch-menu-open .fps.gfx-live{z-index:7;opacity:1;overflow:visible}html.tou
 html.touch-on .gfx-item{min-height:40px}</style>
 <style>/* The loading screen: the build's download, then the game starting and fetching its files. */
 .loading{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:min(340px,calc(100vw - 32px));padding:15px 19px 17px;background:#0d1b1be8;border:1px solid #9fc6b333;border-radius:9px;box-shadow:0 8px 30px #0004;z-index:4;pointer-events:none}.loading[hidden]{display:none}.loading .note{margin:8px 0 11px;font:12px ui-monospace,monospace;color:#d5d6c9;font-variant-numeric:tabular-nums}.loading .bar{height:6px;border-radius:3px;background:#263b36;overflow:hidden}.loading .bar i{display:block;height:100%;width:0;background:#dfb97b;transition:width .25s}.loading.busy .bar i{width:30%;transition:none;animation:loading 1.3s ease-in-out infinite}@keyframes loading{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@media(prefers-reduced-motion:reduce){.loading.busy .bar i{animation:none;width:100%;opacity:.45}}</style>
+<style>/* A replay (?replay=): what the page says when one cannot be played, or plays in light mode after stopping the page (below). */
+.replay-note{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:9;width:min(380px,calc(100vw - 32px));padding:16px 19px 17px;background:#0d1b1bf2;border:1px solid #9fc6b344;border-radius:10px;box-shadow:0 10px 30px #000a;color:#f4f1df;font:13px/1.55 system-ui,sans-serif}.replay-note[hidden]{display:none}
+.replay-note h2{margin:6px 0 6px;font-size:16px;font-weight:600}.replay-note .line{margin:0 0 14px;color:#d5d6c9}.replay-note .actions{display:flex;flex-wrap:wrap;gap:8px}
+.replay-note .actions>*{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid #9fc6b355;border-radius:6px;background:#16302c;color:#f4f1df;font:600 12px system-ui,sans-serif;text-decoration:none;cursor:pointer;touch-action:manipulation}
+.replay-note .actions>.primary{background:#dfb97b;border:0;color:#172321}
+.replay-note.banner{top:calc(max(0px,env(safe-area-inset-top)) + 12px);transform:translateX(-50%);padding:10px 14px 12px}.replay-note.banner .line{margin-bottom:10px;font-size:12px}
+@media(max-width:900px){html.replaying .modes{display:none}}</style>
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -52,7 +59,61 @@ html.touch-on .gfx-item{min-height:40px}</style>
 <nav class="modes" aria-label="Game mode"><a href="?play">Play</a><a href="?demo">Five-player demo</a><a class="legal" href="THIRD_PARTY_LICENSES.html" target="_blank" rel="noopener" title="GPL-3.0-only: the licences of the game and of everything in it, and where its source is">Licences and source</a></nav>
 <div id="readout" class="fps" role="group" aria-label="Frame rate and graphics"><span id="fps">-- FPS</span></div><div id="error" class="error"></div>
 <div id="loading" class="loading" role="progressbar" aria-label="Loading the game"><p class="eyebrow">Hotdog simulator</p><p class="note">Loading…</p><div class="bar"><i></i></div></div>
+<div id="replay-note" class="replay-note" role="alert" hidden><p class="eyebrow">Replay</p><h2></h2><p class="line"></p><div class="actions"></div></div>
 <script type="module">
+const build='hotdog-condiments-20261111';
+// lobby.js: the lobby, the graphics menus on the frame-rate line, and what a replay's guard below decides. Every page has it,
+// imported before the address is read.
+const page=await import(`./lobby.js?v=${build}`).catch(error=>{console.error('lobby.js could not be loaded',error);return null});
+// A message over the game (#replay-note): a title, a line and its buttons ([label, an address or a function, primary]).
+const say=(title,line,actions=[],banner=false)=>{const box=document.querySelector('#replay-note');box.classList.toggle('banner',banner);
+ box.querySelector('h2').textContent=title;box.querySelector('.line').textContent=line;
+ box.querySelector('.actions').replaceChildren(...actions.map(([label,go,primary])=>{const b=document.createElement(typeof go==='string'?'a':'button');b.textContent=label;
+  if(typeof go==='string')b.href=go;else{b.type='button';b.addEventListener('click',go)}if(primary)b.className='primary';return b}));box.hidden=false;return box};
+// A replay (?replay=, src/replay): kept from stopping the page again and again (lobby.js replayStart). A phone's browser ends a
+// page that runs out of memory and loads it again; the note kept here while one is open says so next time, and the replay
+// then plays in light mode (WebGL 2, the lowest graphics: the address is changed before anything reads it), or, ended in
+// light mode too, waits to be asked.
+const replayId=new URLSearchParams(location.search).get('replay');
+const guard=replayId&&page?.replayStart?(()=>{const key=page.REPLAY_GUARD;let stored=null;try{stored=localStorage.getItem(key)}catch{}
+ const light=new URLSearchParams(location.search).has('light');let step=page.replayStart(stored,replayId,light,Date.now());
+ if(step==='light'&&!light)history.replaceState(history.state,'',location.pathname+page.lightAddress(location.search)+location.hash);
+ const mark=()=>{try{localStorage.setItem(key,JSON.stringify({id:replayId,at:Date.now(),light:step!=='normal'}))}catch{}},clear=()=>{try{localStorage.removeItem(key)}catch{}};
+ addEventListener('pagehide',clear);addEventListener('pageshow',event=>{if(event.persisted)mark()});
+ if(step!=='stop')mark();
+ // (Ended last time: the note made the step another than it would have been.)
+ return {step,ended:step!==(light?'light':'normal'),mark,clear}})():null;
+if(replayId)document.documentElement.classList.add('replaying');
+// What the page was doing when it was last ended without a word (lobby.js trailNote): noted every two seconds while the page
+// is shown, taken away when it is left or hidden (a page ended in the background is not a fault), and said in the guard's
+// messages below for whoever looks into it. It stays on the device. The game's memory is its WebAssembly instance's, kept as
+// it is made (only its size is read).
+let memory=null;for(const name of ['instantiate','instantiateStreaming']){const made=WebAssembly[name];if(typeof made!=='function')continue;
+ WebAssembly[name]=function(...args){const result=made.apply(this,args);result?.then?.(r=>{try{memory=(r?.instance??r)?.exports?.memory??memory}catch{}},()=>{});return result}}
+let endedLast='';try{endedLast=page?.trailLine?.(localStorage.getItem(page.TRAIL))??''}catch{}
+if(page?.trailNote){const drop=()=>{try{localStorage.removeItem(page.TRAIL)}catch{}},keep=()=>{if(document.visibilityState!=='visible')return;
+  try{const canvas=document.querySelector('#game');localStorage.setItem(page.TRAIL,JSON.stringify(page.trailNote({now:Date.now(),up:performance.now()/1000,what:replayId?'replay':'game',
+   readout:document.querySelector('#readout')?.textContent,canvas:canvas?`${canvas.width}x${canvas.height}`:'',screen:`${screen.width}x${screen.height} at ${devicePixelRatio}x`,
+   memory:memory?.buffer?.byteLength,replay:window.hotdogReplay})))}catch{}};
+ drop();setInterval(keep,2000);addEventListener('pagehide',drop);
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){keep();if(guard&&guard.step!=='stop')guard.mark()}else{drop();guard?.clear()}})}
+const details=endedLast?` What it was doing: ${endedLast}.`:'';
+const home=location.pathname;
+if(guard?.step==='stop'){document.querySelector('#loading').hidden=true;
+ say('This replay stopped the page twice','On this device the page was ended twice while this replay played, the second time in light mode: most likely the browser ran short of memory. You can try once more, or go back to the game.'+details,
+  [['Try again in light mode',()=>{guard.clear();location.reload()},true],['Back to the game',home]]);
+ await new Promise(()=>{})}
+if(guard?.step==='light'&&guard.ended){const box=say('Light mode','Last time this page was ended while the replay played (most likely the browser ran short of memory), so it plays with the lightest graphics.'+details,
+ [['Full quality',()=>{guard.clear();location.replace(home+page.fullAddress(location.search)+location.hash)}],['OK',()=>{box.hidden=true},true]],true);if(!details)setTimeout(()=>{if(box.classList.contains('banner'))box.hidden=true},15000)}
+// What the game says of the replay (src/replay/page.rs): one that cannot be played is said so here, plainly, with a way on.
+addEventListener('hotdog:replay',event=>{const st=event.detail;if(st?.state!=='failed')return;guard?.clear();
+ const [title,retry]=page?.replayTrouble?.(st.kind)??['This replay cannot be played',true];
+ say(title,String(st.message||''),[...(retry?[['Try again',()=>location.reload(),true]]:[]),['Back to the game',home,!retry]])});
+// The game itself stopping while a replay plays (out of memory, a crash): said, with light mode offered.
+for(const type of ['error','unhandledrejection'])addEventListener(type,event=>{if(!replayId)return;const text=String(event.message??event.reason?.message??event.reason??'');
+ if(!/RuntimeError|unreachable|out of memory|memory access out of bounds|Maximum call stack/i.test(text))return;document.querySelector('#loading').hidden=true;
+ const [title]=page?.replayTrouble?.('memory')??['The replay stopped'];
+ say(title,`The game stopped while the replay played (${text.slice(0,120)}). On a phone that is most often memory: light mode draws less.`,[['Try in light mode',()=>{guard?.clear();location.replace(home+(page?.lightAddress?.(location.search)??location.search)+location.hash)},true],['Back to the game',home]])});
 let stage=0;window.hotdogAction=0;
 const stages=[
  ['01 / 03 · Meet the chef','The morning shift','Maya is here to bring all six hotdogs to the prep station.','Opening the fridge…',true],
@@ -84,7 +145,6 @@ document.querySelector('#game').addEventListener('contextmenu',event=>event.prev
 // Ctrl is crouch, and Ctrl with the wheel zooms the page: the wheel changes guns (src/arena.rs), so the page leaves its zoom alone. (Not stopped: the game still hears it.)
 document.querySelector('#game').addEventListener('wheel',event=>{if(event.ctrlKey)event.preventDefault()},{passive:false});
 const fps=document.querySelector('#fps');let frames=0,stamp=performance.now();function tick(t){frames++;if(t-stamp>500){fps.textContent=Math.round(frames*1000/(t-stamp))+' FPS';frames=0;stamp=t}requestAnimationFrame(tick)}requestAnimationFrame(tick);
-const build='hotdog-condiments-20261111';
 // The loading screen: the build's download as it arrives, then the game starting and the files it fetches (textures, sounds,
 // shaders: its fetches under assets/ are counted), until it has drawn and has them all.
 const loading=(()=>{const box=document.querySelector('#loading'),note=box.querySelector('.note'),fill=box.querySelector('.bar i'),fetch0=window.fetch.bind(window);
@@ -93,7 +153,11 @@ const loading=(()=>{const box=document.querySelector('#loading'),note=box.queryS
  const hide=()=>{done=true;box.hidden=true};
  window.fetch=(...a)=>{const p=fetch0(...a);if(!done&&/(^|\/)assets\//.test(String(a[0]?.url??a[0]))){asked++;p.catch(()=>{}).finally(()=>arrived++)}return p};
  // (Once the game draws, a file that never arrives keeps the screen up for 15 s at most.)
- let drawn=0;const watch=()=>{if(done)return;if(window.hotdogMetrics){drawn||=performance.now();if(arrived>=asked||performance.now()-drawn>15000)return hide()}
+ // (A replay's page waits for the replay too: its file and its first frames, two minutes at most.)
+ let drawn=0;const watch=()=>{if(done)return;if(window.hotdogMetrics){drawn||=performance.now();
+   const waiting=!!replayId&&!/^(playing|failed)$/.test(window.hotdogReplay?.state||'')&&performance.now()-drawn<120000;
+   if(!waiting&&(arrived>=asked||performance.now()-drawn>15000))return hide();
+   if(waiting&&arrived>=asked){show('Loading the replay…',null);setTimeout(watch,150);return}}
   if(asked)show(`Loading the kitchen · ${arrived} of ${asked} files`,arrived/asked);setTimeout(watch,150)};
  // The build itself: its response goes to WebAssembly.instantiateStreaming untouched (so Chrome can keep its compiled code), and a
  // copy of it is counted. The server says how long it is unpacked when it sends it packed (x-decoded-length).
@@ -128,7 +192,6 @@ if(query.has('sandbox')){const sheet=document.createElement('link');sheet.rel='s
 // (one port for the page, the game and the lobby: ws://HOST:PORT/ws), wss when the page is https.
 // The same module has the graphics menus on the frame-rate line, which every page has, so it is loaded on every page.
 const online=query.get('server')||(query.has('mp')?`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`:'');
-const page=await import(`./lobby.js?v=${build}`).catch(error=>{console.error('lobby.js could not be loaded',error);return null});
 if(online&&page){const sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href=`lobby.css?v=${build}`;document.head.append(sheet);
  try{page.start(online)}catch(error){console.error('The lobby could not be loaded',error)}}
 // The build: the address's, else the renderer chosen (Auto when none was), where the browser can have it.

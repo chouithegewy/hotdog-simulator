@@ -28,6 +28,7 @@
 //! **Recording** single player: record.rs. **The list** of replays (the Esc menu's REPLAYS): list.rs. **Where** they
 //! are kept: store.rs.
 pub mod list;
+pub mod page;
 pub mod pov;
 pub mod record;
 pub mod store;
@@ -180,8 +181,9 @@ pub struct Tracer {
 pub struct Viewer {
     pub source: String,
     loading: Option<store::Loading>,
-    /// Why it cannot be played, when it cannot.
+    /// Why it cannot be played, when it cannot; and what the page says of it (page.rs: its kind, and the words).
     pub failed: Option<String>,
+    pub failure: Option<(&'static str, String)>,
     pub replay: Option<Replay>,
     /// What is handed to the client (LEAD ahead of the clock), and what has been played at the clock (the stats, the
     /// overlays).
@@ -227,6 +229,9 @@ pub struct Viewer {
     kicks: Vec<usize>,
     blows: Vec<usize>,
     swings: Option<(u32, u32)>,
+    /// What the page was last told, and when (page.rs).
+    told: String,
+    told_at: f64,
 }
 impl Viewer {
     pub fn new(source: &str) -> Viewer {
@@ -234,6 +239,7 @@ impl Viewer {
             source: source.into(),
             loading: None,
             failed: None,
+            failure: None,
             replay: None,
             ahead: None,
             now: None,
@@ -264,6 +270,8 @@ impl Viewer {
             kicks: vec![],
             blows: vec![],
             swings: None,
+            told: String::new(),
+            told_at: f64::MIN,
         }
     }
     /// Whether the replay is watched through a player's recorded view this frame.
@@ -292,6 +300,14 @@ impl Viewer {
         let at = self.ticks.iter().rev().find(|(m, _)| *m as f64 <= ms).or(self.ticks.front());
         at.map_or(0., |(m, t)| *t as f64 + (ms - *m as f64) * self.hz as f64 / 1000.)
     }
+    /// Watches the next player (`way` 1) or the previous (-1), in the order the frames list them.
+    pub fn step_player(&mut self, way: i32) {
+        let players = self.players();
+        if let Some(at) = players.iter().position(|id| *id == self.watched) {
+            let n = players.len() as i32;
+            self.watched = players[(at as i32 + way).rem_euclid(n) as usize];
+        }
+    }
     /// The kill marker after (or before) the clock, by `way`.
     pub fn kill(&self, way: i32) -> Option<f64> {
         let kills = self.markers().into_iter().filter(|m| m.kind != Mark::RoundEnd).map(|m| m.ms as f64);
@@ -312,6 +328,7 @@ pub fn feed(world: &mut World) {
         let menu = world.get_resource::<crate::menu::Menu>().is_some_and(|m| m.open) || world.get_resource::<list::List>().is_some_and(|l| l.open);
         if !menu {
             keys(world, &mut v);
+            page::asks(world, &mut v);
         }
         if !v.paused && !menu {
             v.clock += real * SPEEDS[v.speed] as f64 * 1000.;
@@ -336,15 +353,16 @@ pub fn feed(world: &mut World) {
             pov::before(world, views, replay, watched, clock, through, seeks);
         }
     }
+    page::tell(&mut v, now);
     world.insert_resource(v);
 }
 /// Loads the replay (natively at once, in a browser when its file has come) and plays it from the start.
 fn load(world: &mut World, v: &mut Viewer) {
     let loading = v.loading.get_or_insert_with(|| store::fetch(&v.source.clone()));
     let Some(done) = store::poll(loading) else { return };
-    let replay = done.and_then(|bytes| Replay::parse(bytes).map_err(|e| e.to_string()));
+    let replay = done.map_err(|e| page::failure(&e)).and_then(|bytes| Replay::parse(bytes).map_err(|e| page::unplayable(&e)));
     let replay = match replay {
-        Ok(replay) if replay.chunks.is_empty() => Err("The replay holds no part of a game: it was cut short before its first seconds.".to_string()),
+        Ok(replay) if replay.chunks.is_empty() => Err(("damaged", "The replay holds no part of a game: it was cut short before its first seconds.".to_string())),
         other => other,
     };
     match replay {
@@ -375,10 +393,13 @@ fn load(world: &mut World, v: &mut Viewer) {
             world.resource_mut::<Network>().replay = Some(VecDeque::from([Incoming::Text(welcome)]));
             seek(world, v, 0.);
         }
-        Err(error) => {
+        Err((kind, error)) => {
             warn!("Replay {}: {error}", v.source);
+            // (In a browser the page says it, with a way on: page.rs, index.html.)
+            #[cfg(not(target_arch = "wasm32"))]
             crate::level::notice(&error);
-            v.failed = Some(error);
+            v.failed = Some(error.clone());
+            v.failure = Some((kind, error));
         }
     }
 }
@@ -546,12 +567,11 @@ fn keys(world: &mut World, v: &mut Viewer) {
     }
     let players = v.players();
     if !players.is_empty() {
-        let at = players.iter().position(|id| *id == v.watched).unwrap_or(0);
         if tapped(Action::NextPlayer) {
-            v.watched = players[(at + 1) % players.len()];
+            v.step_player(1);
         }
         if tapped(Action::PreviousPlayer) {
-            v.watched = players[(at + players.len() - 1) % players.len()];
+            v.step_player(-1);
         }
         for (i, action) in Action::WATCH.into_iter().enumerate() {
             if tapped(action)
@@ -640,8 +660,11 @@ fn fly(world: &mut World, v: &mut Viewer, real: f32) {
     // A drag turns the view: the right button anywhere, the left off the viewer's buttons and bar.
     let dragging = !menu && (mouse.pressed(MouseButton::Right) || (mouse.pressed(MouseButton::Left) && v.drag.is_some()));
     let starting = !menu && (mouse.just_pressed(MouseButton::Right) || (mouse.just_pressed(MouseButton::Left) && !over_ui));
+    // The page's touch controls (page.rs): a drag on the view looks round (in mouse counts, the look speed applied), two
+    // fingers fly the free camera as a stick would, and a pinch is the wheel. (With them on, a finger is not the mouse.)
+    let pad = crate::touch::now(world);
     let mut turn = Vec2::ZERO;
-    if (dragging || starting) && cursor.is_some() {
+    if !pad.on && (dragging || starting) && cursor.is_some() {
         if let (Some(was), Some(at)) = (v.drag, cursor) {
             turn = at - was;
         }
@@ -649,8 +672,11 @@ fn fly(world: &mut World, v: &mut Viewer, real: f32) {
     } else {
         v.drag = None;
     }
+    if !menu {
+        turn += pad.look;
+    }
     let sensitivity = 0.0045 * world.get_resource::<crate::settings::Settings>().map_or(1., |s| s.sensitivity.max(0.1) / 1.5);
-    let wheel = if menu { 0. } else if scroll.unit == MouseScrollUnit::Pixel { scroll.delta.y / 60. } else { scroll.delta.y };
+    let wheel = if menu { 0. } else if scroll.unit == MouseScrollUnit::Pixel { scroll.delta.y / 60. } else { scroll.delta.y } + pinched(pad.pinch);
     match v.mode {
         Mode::Fly => {
             v.fly.yaw -= turn.x * sensitivity;
@@ -674,6 +700,9 @@ fn fly(world: &mut World, v: &mut Viewer, real: f32) {
                 }
                 let fast = if held(Action::FlyFast) { 4. } else { 1. };
                 v.fly.at += way.normalize_or_zero() * v.fly.speed * fast * real;
+                // Two fingers: as far as they have moved from where they landed, that fast (y down is back, as S).
+                let stick = pad.stick.clamp_length_max(1.);
+                v.fly.at += rotation * Vec3::new(stick.x, 0., stick.y) * v.fly.speed * real;
             }
         }
         Mode::Follow | Mode::First => {
@@ -684,6 +713,11 @@ fn fly(world: &mut World, v: &mut Viewer, real: f32) {
             }
         }
     }
+}
+/// A pinch (touch.rs `Pad::pinch`: the log of how many times further apart the fingers went) as notches of the wheel:
+/// apart is up (faster flying, a nearer follow camera), a doubling of the distance three notches.
+pub fn pinched(pinch: f32) -> f32 {
+    if pinch.is_finite() { pinch / std::f32::consts::LN_2 * 3. } else { 0. }
 }
 /// The sounds go at the replay's speed: pitched with it (a quarter speed, two octaves down; twice, one up), and held
 /// while it is paused. At full speed they are left alone (a kill's slow motion pitches them itself: slowmo.rs).

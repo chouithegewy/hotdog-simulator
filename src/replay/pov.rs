@@ -618,6 +618,9 @@ impl Views {
     }
     fn track(&mut self, replay: &kitchen_sim::replay::Replay, id: u32) -> Option<&pov::Track> {
         if !self.tracks.contains_key(&id) {
+            // One player's track is kept read at a time (a few megabytes for a whole match each): another's is read
+            // again, in a few milliseconds, when it is watched again. A browser's memory never shrinks back.
+            self.tracks.retain(|_, track| track.is_none());
             let track = replay.track(id).or_else(|| self.kept.iter().find(|(p, _)| *p == id).map(|(_, t)| t.clone()));
             if let Some(t) = &track {
                 info!("Replay: player {id}'s own view, {} frames from {:.1} s to {:.1} s{}", t.samples.len(), t.span().map_or(0., |s| s.0 / 1e3), t.span().map_or(0., |s| s.1 / 1e3), t.dropped.as_ref().map_or(String::new(), |w| format!(" (the server stopped keeping it: {w})")));

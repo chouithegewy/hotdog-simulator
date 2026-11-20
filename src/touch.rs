@@ -140,6 +140,9 @@ pub mod can {
     /// full, so the special is ready.
     pub const FIGHT: u32 = 1 << 28;
     pub const CHI: u32 = 1 << 29;
+    /// A replay is watched (replay/): none of the game's buttons, the viewer's own controls instead (replay/page.rs); a
+    /// drag looks round, two fingers fly the free camera (the stick) and pinch.
+    pub const REPLAY: u32 = 1 << 30;
 }
 
 /// This frame's touch input that the keys cannot carry, for `arena::tick` and the lobby.
@@ -337,6 +340,7 @@ pub(crate) fn press(
     seen: Option<Res<crate::cards::Seen>>,
     hinted: Option<Res<crate::hints::Hints>>,
     bindings: Option<Res<Bindings>>,
+    viewer: Option<Res<crate::replay::Viewer>>,
 ) {
     let frame = parse(&read());
     ON.store(frame.is_some(), Ordering::Relaxed);
@@ -357,7 +361,8 @@ pub(crate) fn press(
         pad.told = None;
         return;
     }
-    let now = game.as_deref().map_or(0, |g| state(g, lobby.is_some_and(|l| l.holding), seen.as_deref()) | hints(g, hinted.as_deref()));
+    // (Watching a replay the watched hotdog is drawn as this player's own, but there is nothing of it to play.)
+    let now = if viewer.is_some() { can::REPLAY } else { game.as_deref().map_or(0, |g| state(g, lobby.is_some_and(|l| l.holding), seen.as_deref()) | hints(g, hinted.as_deref())) };
     if pad.told != Some(now) {
         pad.told = Some(now);
         tell(now);

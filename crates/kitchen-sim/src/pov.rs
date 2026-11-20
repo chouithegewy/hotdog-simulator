@@ -706,6 +706,10 @@ impl Track {
         let mut all: Vec<Batch> = batches.filter_map(|b| Batch::decode(b).ok()).filter(|b| !b.samples.is_empty()).collect();
         all.sort_by(|a, b| a.samples[0].t.total_cmp(&b.samples[0].t));
         let mut track = Track { header, ..Default::default() };
+        // (Each list at its size at once: grown by doubling it would take up to twice that for a moment, which a
+        // browser's memory keeps.)
+        track.samples.reserve_exact(all.iter().map(|b| b.samples.len()).sum());
+        track.events.reserve_exact(all.iter().map(|b| b.events.len()).sum());
         for b in all {
             // (A batch that overlaps the one before, a resend, is left out.)
             if track.samples.last().is_some_and(|l| b.samples[0].t <= l.t) {

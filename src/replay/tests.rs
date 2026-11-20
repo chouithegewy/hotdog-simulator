@@ -342,3 +342,103 @@ fn a_file_that_is_not_a_replay_or_of_another_format_says_so_and_plays_nothing() 
     assert!(app.world().resource::<Viewer>().failed.as_deref().is_some_and(|f| f.contains("format 9")));
     let _ = (std::fs::remove_file(path), std::fs::remove_file(path2));
 }
+
+/// The texts on the viewer's screen.
+fn texts(world: &mut World) -> Vec<String> {
+    world.query::<&Text>().iter(world).map(|t| t.0.clone()).collect()
+}
+/// In a browser the file comes some frames after the screen is first built: the screen then says what is played (not
+/// LOADING THE REPLAY... for ever), with the timeline's markers; and one that cannot be played says so. What the page
+/// is told (page.rs) follows: loading, playing, failed with its kind.
+#[test]
+fn the_screen_says_what_is_played_once_the_file_has_come_or_that_it_cannot_be() {
+    let (bytes, _) = recorded(6.);
+    let mut world = World::new();
+    world.init_resource::<ButtonInput<MouseButton>>();
+    world.insert_resource(Viewer::new("in a browser"));
+    let mut schedule = Schedule::default();
+    schedule.add_systems(ui::draw);
+    schedule.run(&mut world);
+    assert!(texts(&mut world).iter().any(|t| t == "LOADING THE REPLAY..."));
+    assert_eq!(page::state(world.resource::<Viewer>())["state"], "loading");
+    // The file comes.
+    let replay = Replay::parse(bytes.clone()).unwrap();
+    let map = replay.header.map_name.to_ascii_uppercase();
+    world.resource_mut::<Viewer>().replay = Some(replay);
+    schedule.run(&mut world);
+    let shown = texts(&mut world);
+    assert!(!shown.iter().any(|t| t.contains("LOADING")), "{shown:?}");
+    assert!(shown.iter().any(|t| t.contains(&map) && t.contains("FREE FOR ALL")), "{shown:?}");
+    let told = page::state(world.resource::<Viewer>());
+    assert_eq!((told["state"].as_str(), told["duration"].as_f64().is_some_and(|d| d > 5000.)), (Some("playing"), true), "{told}");
+    // One that cannot be played.
+    let mut world = World::new();
+    world.init_resource::<ButtonInput<MouseButton>>();
+    world.insert_resource(Viewer::new("broken"));
+    let mut schedule = Schedule::default();
+    schedule.add_systems(ui::draw);
+    schedule.run(&mut world);
+    {
+        let mut v = world.resource_mut::<Viewer>();
+        v.failed = Some("replays/x: HTTP 404".into());
+        v.failure = Some(page::failure("replays/x: HTTP 404"));
+    }
+    schedule.run(&mut world);
+    let shown = texts(&mut world);
+    assert!(shown.iter().any(|t| t == "THE REPLAY CANNOT BE PLAYED") && !shown.iter().any(|t| t.contains("LOADING")), "{shown:?}");
+    assert_eq!(page::state(world.resource::<Viewer>())["kind"], "missing");
+}
+
+/// The page's controls (touch.js) do what the keys do: play and pause, the speeds, a seek to a share of the timeline,
+/// five seconds on, the next player and the next view.
+#[test]
+fn the_pages_controls_play_pause_seek_and_change_the_view() {
+    let (bytes, _) = recorded(12.);
+    let path = file("page", &bytes);
+    let mut app = viewer(&path);
+    frames(&mut app, 30, 1. / 60.);
+    let ask = |app: &mut App, word: &str| {
+        let world = app.world_mut();
+        let mut v = world.remove_resource::<Viewer>().unwrap();
+        page::apply(world, &mut v, page::parse(word).unwrap());
+        world.insert_resource(v);
+    };
+    ask(&mut app, "play");
+    assert!(app.world().resource::<Viewer>().paused);
+    ask(&mut app, "speed:3");
+    ask(&mut app, "play");
+    let v = app.world().resource::<Viewer>();
+    assert!(!v.paused && v.speed == 3);
+    ask(&mut app, "seek:0.5");
+    let duration = app.world().resource::<Viewer>().duration();
+    assert!((app.world().resource::<Viewer>().seek.unwrap() - duration / 2.).abs() < 1.);
+    frames(&mut app, 20, 1. / 60.);
+    let clock = app.world().resource::<Viewer>().clock;
+    assert!((clock - duration / 2.).abs() < 1500., "sought to the middle: {clock} of {duration}");
+    ask(&mut app, "ahead");
+    assert!(app.world().resource::<Viewer>().seek.unwrap() <= duration);
+    let (before, mode) = (app.world().resource::<Viewer>().watched, app.world().resource::<Viewer>().mode);
+    ask(&mut app, "next");
+    ask(&mut app, "view");
+    let v = app.world().resource::<Viewer>();
+    assert!(v.watched != before && v.mode == mode.next(), "{} {:?}", v.watched, v.mode);
+    ask(&mut app, "stats");
+    assert!(app.world().resource::<Viewer>().show.stats);
+    let _ = std::fs::remove_file(path);
+}
+
+/// The bar and the stats fit the window: on a desktop as they were; on a phone held upright the bar no wider than the
+/// screen, and the stats in fewer columns at a size that can be read; sideways the stats whole.
+#[test]
+fn the_bar_and_the_stats_fit_a_phone_held_either_way() {
+    assert_eq!(ui::bar_width(1., 1280.), 640.);
+    assert!(ui::bar_width(0.6, 428.) * 0.6 <= 428. - 20.);
+    assert_eq!(ui::stats_fit(1., 1280.), (11, 1.));
+    let (columns, scale) = ui::stats_fit(0.6, 428.);
+    assert!(columns < 11 && scale >= 0.9, "{columns} {scale}");
+    assert_eq!(ui::stats_fit(0.6, 926.), (11, 0.6), "sideways: every column");
+    assert_eq!(ui::card_left(5, 281., 428.), Val::Px(-206.), "upright: 8 px in from the left edge");
+    assert_eq!(ui::card_left(11, 798., 1280.), Val::Px(-399.), "centred");
+    let (columns, scale) = ui::stats_fit(0.6, 320.);
+    assert!(columns == 5 && scale >= 0.3 && scale < 0.9, "a very small screen: the fewest, smaller: {columns} {scale}");
+}

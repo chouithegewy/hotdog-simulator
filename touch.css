@@ -120,3 +120,42 @@ html[data-touch=lobby] .touch-bar,html[data-touch=table] .touch-bar,html[data-to
  .touch[data-mode=table] .tb-fire{--s:88px;right:calc(var(--r) + 16px);bottom:calc(var(--b) + 200px)}
  .touch[data-mode=table] .tb-scope{--s:72px;left:calc(var(--l) + 16px);bottom:calc(var(--b) + 208px)}
 }
+
+/* A replay (touch.js, src/replay/page.rs): the viewer's own bar along the bottom instead of the game's buttons, its
+   targets 44 px and more. Upright: whose view, the timeline, the playback, and the view, the stats and the way out, a
+   row each; sideways (a short screen): whose view beside the timeline, over one row of the rest. The page's links and the frame-rate
+   line keep out of its way. A tap on the picture puts it away (the Controls button brings it back). */
+html[data-touch=replay] .modes{display:none}
+html[data-touch=replay] .fps{right:auto;left:50%;transform:translateX(-50%);bottom:auto;top:calc(var(--touch-t) + 2px);max-width:calc(100% - 16px);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;opacity:.6}
+.touch-replay{position:fixed;z-index:5;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));bottom:calc(var(--touch-b) + 4px);display:grid;grid-template-columns:1fr;grid-template-areas:"who" "line" "keys" "more";gap:6px;padding:8px 10px 10px;background:#0d1b1bd9;border:1px solid #9fc6b333;border-radius:12px;box-shadow:0 8px 30px #0006;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#f4f1df;font:600 12px ui-monospace,monospace;letter-spacing:.06em;touch-action:manipulation;-webkit-user-select:none;user-select:none;max-width:720px;margin:0 auto}
+.touch-replay[hidden],.touch-replay-show[hidden]{display:none}
+.touch-replay button{min-width:44px;min-height:44px;padding:0 10px;border:1px solid #9fc6b355;border-radius:8px;background:#16302c;color:#f4f1df;font:inherit;letter-spacing:inherit;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.touch-replay button:active{background:#285a48}
+.touch-replay button:disabled{opacity:.4}
+.touch-replay button:focus-visible,.trp-track:focus-visible{outline:2px solid #dfb97b;outline-offset:2px}
+.trp-who{grid-area:who;display:flex;align-items:center;gap:8px;min-width:0}
+.trp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:11px;color:#dfd7bc}
+.trp-line{grid-area:line;display:flex;align-items:center;gap:10px;min-width:0}
+.trp-time{flex:none;font-variant-numeric:tabular-nums;font-size:12px;color:#f4f1df}
+.trp-track{position:relative;flex:1;height:44px;touch-action:none;cursor:pointer}
+.trp-rail{position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;border-radius:3px;background:#ffffff29;overflow:hidden}
+.trp-fill{display:block;height:100%;width:0;background:#dfb97b}
+.trp-marks i{position:absolute;top:50%;width:2px;height:12px;margin:-6px 0 0 -1px;background:#ff5c4d;pointer-events:none}
+.trp-marks i.end{height:16px;margin-top:-8px;background:#dfb97b}
+.trp-knob{position:absolute;top:50%;left:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:#f4f1df;box-shadow:0 1px 6px #0008;pointer-events:none}
+.trp-keys{grid-area:keys;display:flex;align-items:center;gap:6px;justify-content:space-between}
+.trp-keys .trp-play{flex:1 0 76px;background:#dfb97b;border:0;color:#172321}
+.trp-speeds{display:flex;gap:4px}
+.trp-speeds button{padding:0 6px;min-width:42px}
+.trp-speeds button[aria-checked=true]{background:#dfb97b55;border-color:#dfb97b;color:#f6dfb2}
+.trp-more{grid-area:more;display:flex;gap:6px}
+.trp-more .trp-view{flex:1}
+.trp-more .trp-stats[aria-pressed=true]{background:#dfb97b55;border-color:#dfb97b}
+.trp-more .trp-exit{color:#f1c2ae}
+.touch-replay-show{position:fixed;z-index:5;right:var(--touch-r);bottom:calc(var(--touch-b) + 8px);min-width:44px;min-height:44px;padding:0 14px;border:1px solid #9fc6b355;border-radius:22px;background:#0d1b1bc4;color:#f4f1df;font:600 11px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);touch-action:manipulation}
+@media (orientation:landscape) and (max-height:540px){
+ .touch-replay{grid-template-columns:minmax(0,34vw) minmax(0,1fr) auto;grid-template-areas:"who line line" "keys keys more";gap:4px 10px;padding:4px 8px 6px;max-width:none}
+ .trp-track{height:40px}
+ .touch-replay button{min-height:40px}
+ .trp-keys{justify-content:flex-start}.trp-keys .trp-play{flex:0 0 96px}
+}

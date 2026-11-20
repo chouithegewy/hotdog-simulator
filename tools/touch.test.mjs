@@ -4,7 +4,7 @@
 //   node --test tools/touch.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {steer,shown,CAN,BUTTON,REACH,DEAD,OWN} from '../touch.js';
+import {steer,shown,CAN,BUTTON,REACH,DEAD,OWN,clock,replayWords,along,pair,tapped} from '../touch.js';
 
 const names=state=>shown(state).map(([name])=>name);
 const label=(state,name)=>shown(state).find(([n])=>n===name)?.[1];
@@ -59,7 +59,7 @@ test('at the table only flip and stop show', ()=>{
  assert.deepEqual(kinds(table),['dim','dim']);assert.equal(label(table,'FIRE'),'Flip');
  assert.equal(label(table|CAN.PICK,'FIRE'),'Pick');
  // Whatever else the state says, the round's buttons stay away.
- assert.deepEqual(names(~0>>>0&~CAN.LOBBY),['FIRE','SCOPE']);
+ assert.deepEqual(names(~0>>>0&~CAN.LOBBY&~CAN.REPLAY),['FIRE','SCOPE']);
  assert.deepEqual([CAN.TABLE,CAN.GO,CAN.PICK],[1<<22,1<<23,1<<24],'as src/touch.rs numbers them');
 });
 
@@ -74,7 +74,7 @@ test('picking who gets an action card, Stop becomes Me: the one way by touch to 
 });
 
 test('every button the page shows is one the game reads', ()=>{
- for(const [name] of shown(~0>>>0&~CAN.LOBBY&~CAN.BACON&~CAN.CARRY&~CAN.TABLE))assert.ok(name in BUTTON,name);
+ for(const [name] of shown(~0>>>0&~CAN.LOBBY&~CAN.REPLAY&~CAN.BACON&~CAN.CARRY&~CAN.TABLE))assert.ok(name in BUTTON,name);
  assert.equal(Object.values(BUTTON).reduce((a,b)=>a|b,0),(1<<15)-1,'fifteen bits, as src/touch.rs has them');
 });
 
@@ -103,4 +103,39 @@ test('Kung Fu: the buttons are the fight\'s, the special lit when the chi is ful
 test('touches on the page\'s own panels are left to them', ()=>{
  const own=OWN.split(',');
  for(const part of ['button','input','.lobby','.touch-menu','.chat-form','.tune'])assert.ok(own.includes(part),part);
+});
+
+test('a replay shows none of the game\'s buttons: its own bar, and touches on it are left to it', ()=>{
+ assert.equal(CAN.REPLAY,2**30,'as src/touch.rs numbers it');
+ assert.deepEqual(names(CAN.REPLAY),[]);
+ assert.deepEqual(names(CAN.REPLAY|CAN.PLAY|CAN.ALIVE),[],'whatever else is set');
+ assert.ok(OWN.split(',').includes('.touch-replay')&&OWN.split(',').includes('.replay-note'));
+});
+
+test('the replay\'s bar says the time, play or pause, and the view, from what the game tells', ()=>{
+ assert.equal(clock(0),'0:00');assert.equal(clock(12_400),'0:12');assert.equal(clock(296_933),'4:56');assert.equal(clock(3_725_000),'1:02:05');assert.equal(clock(-5),'0:00');assert.equal(clock(undefined),'0:00');
+ const st={state:'playing',clock:12_000,duration:296_933,paused:false,ended:false,mode:'first'};
+ assert.deepEqual(replayWords(st),{time:'0:12 / 4:56',play:'Pause',view:'First person',share:12_000/296_933});
+ assert.equal(replayWords({...st,paused:true}).play,'Play');
+ assert.equal(replayWords({...st,ended:true,paused:true}).play,'Again');
+ assert.equal(replayWords({...st,mode:'follow'}).view,'Follow');assert.equal(replayWords({...st,mode:'fly'}).view,'Free camera');
+ assert.equal(replayWords({...st,duration:0}).share,0,'no length yet');
+ assert.equal(replayWords({...st,clock:999_999}).share,1);
+});
+
+test('a tap or a drag on the timeline seeks to that share of it, and no further than its ends', ()=>{
+ assert.equal(along(110,10,400),0.25);assert.equal(along(0,10,400),0);assert.equal(along(900,10,400),1);assert.equal(along(50,10,0),0);
+});
+
+test('two fingers fly as a stick from where they landed and pinch by how much further apart they are', ()=>{
+ const start=[200,300];
+ const still=pair(start,100,[150,300],[250,300]);assert.deepEqual([still.x,still.y,still.pinch,still.d],[0,0,0,100],'where they landed: nothing');
+ const up=pair(start,100,[150,300-REACH],[250,300-REACH]);assert.ok(Math.abs(up.y+1)<1e-9&&Math.abs(up.x)<1e-9,'both moved up a reach: forwards at full pace');
+ const apart=pair(start,100,[100,300],[300,300]);assert.ok(Math.abs(apart.pinch-Math.log(2))<1e-9&&apart.d===200,'twice as far apart');
+ const together=pair(start,200,[175,300],[225,300]);assert.ok(together.pinch<0,'pinched together');
+ assert.equal(pair(start,0,[200,300],[200,300]).pinch,0,'no distance to compare');
+});
+
+test('a tap on the picture is short and stays where it landed; anything else is a look', ()=>{
+ assert.ok(tapped(120,2,3));assert.ok(!tapped(600,0,0),'held');assert.ok(!tapped(120,30,0),'dragged');
 });

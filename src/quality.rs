@@ -673,6 +673,12 @@ pub fn start(class: Class, device: &Device) -> (Level, Option<f32>) {
     (level, budget)
 }
 
+/// The best a replay's viewer may draw at ([`Graphics::cap`]): on a phone or tablet, the device's own start; elsewhere
+/// no limit.
+pub fn viewer_cap(class: Class, replay: bool, start: Rung) -> Option<Rung> {
+    (replay && class == Class::Phone).then_some(start)
+}
+
 /// The frame rate the governor keeps the game above, as a frame time: slower than this for a while is too slow.
 pub const TARGET_MS: f32 = 20.;
 /// A window whose pace is under this holds a display's 60 Hz: a frame rate that reads 56 to 64 around a 60 Hz cap is
@@ -788,6 +794,21 @@ pub struct Governor {
     /// The step of scale down last taken (to, from), and the pace and the main thread's work before it: it has to help
     /// ([`HELPED`]).
     dropped: Option<(Rung, Rung, f32, Option<f32>)>,
+    /// The best it may go to ([`Graphics::cap`]: a replay watched on a phone keeps to the device's own start): it steps
+    /// down as ever, and back up no further than this.
+    pub cap: Option<Rung>,
+}
+
+/// Whether `rung` is better than `cap`: a better level, or the same level drawn more finely.
+pub fn above(rung: Rung, cap: Rung) -> bool {
+    rung.level < cap.level || (rung.level == cap.level && rung.scale > cap.scale + 0.001)
+}
+/// `rung`, or `cap` where `rung` is better than it.
+pub fn within(rung: Rung, cap: Option<Rung>) -> Rung {
+    match cap {
+        Some(cap) if above(rung, cap) => cap,
+        _ => rung,
+    }
 }
 
 /// What the governor saw in its window.
@@ -841,6 +862,7 @@ impl Governor {
             changed: now,
             smooth: false,
             dropped: None,
+            cap: None,
         }
     }
 
@@ -983,6 +1005,9 @@ impl Governor {
             }
         }
         let up = up(self.rung, self.shape)?;
+        if self.cap.is_some_and(|cap| above(up, cap)) {
+            return None;
+        }
         let level = up.level != self.rung.level;
         // The main thread's room for the step: a better level costs it more ([`CPU`]), a finer scale next to nothing.
         let fits = busy.map(|b| !level || b * cpu(up.level) / cpu(self.rung.level) <= BUSY_FIT * mean.max(FRAME_60));
@@ -1045,6 +1070,12 @@ pub struct Graphics {
     /// A quality and a resolution chosen in the game's own menu (menu.rs), taken up by the next frame's `govern`.
     asked: Option<Choice>,
     asked_resolution: Option<Resolution>,
+    /// The best Auto may go to: a replay watched on a phone or tablet starts on the device's own start and never goes
+    /// above it (a remembered rung above it included). A viewer draws a whole match through other players' eyes, with
+    /// nothing of this player's to play, and a phone's browser stops a page outright on memory (iOS Safari: "A problem
+    /// repeatedly occurred"), long before it would slow down: the governor still steps down, never up past this. Set
+    /// once the device is known ([`decide`]); a level the player picks is theirs.
+    pub cap: Option<Rung>,
 }
 
 impl Default for Graphics {
@@ -1071,6 +1102,7 @@ impl Default for Graphics {
             ready: false,
             asked: None,
             asked_resolution: None,
+            cap: None,
         }
     }
 }
@@ -1100,7 +1132,7 @@ impl Graphics {
     /// level, that level at its finest scale within its cap.
     fn anchor(&self) -> Rung {
         match self.choice {
-            Choice::Auto => self.remembered.unwrap_or(self.start),
+            Choice::Auto => within(self.remembered.unwrap_or(self.start), self.cap),
             Choice::Fixed(level) => picked(level, self.dpr, self.scalable, self.pixels),
         }
     }
@@ -1157,7 +1189,8 @@ impl Graphics {
             None => anchor,
         };
         let shape = self.shape();
-        self.governor = (self.choice == Choice::Auto).then(|| Governor::new(self.rung, shape, now));
+        let cap = self.cap;
+        self.governor = (self.choice == Choice::Auto).then(|| Governor { cap, ..Governor::new(self.rung, shape, now) });
     }
 
     /// One frame of `ms` milliseconds, `busy` of them the main thread's work (None where not measured), for the
@@ -1175,7 +1208,8 @@ impl Graphics {
     /// Whether where the governor settles is worth remembering for the next visit: not while a fixed
     /// resolution holds it to one scale, which is not where Auto would settle.
     fn learning(&self) -> bool {
-        self.fixed_scale().is_none()
+        // (Nor under a cap: the viewer's rung says nothing of where the game itself would settle.)
+        self.fixed_scale().is_none() && self.cap.is_none()
     }
 }
 
@@ -1304,6 +1338,7 @@ fn decide(
         let (dpr, scalable) = (graphics.dpr, graphics.scalable);
         graphics.remembered = rung.map(|rung| nearest(rung.level, rung.scale, dpr, scalable, floored));
     }
+    graphics.cap = viewer_cap(class, !options.replay.is_empty(), graphics.start);
     let now = time.elapsed_secs_f64();
     graphics.follow_choice(now);
     // A profiling run measures one fixed level.
@@ -1327,7 +1362,8 @@ fn decide(
         detail.scale * 100.,
         graphics.start.level.name(),
         graphics.start.scale * 100.,
-        graphics.remembered.map(|r| format!("; remembered {} at {:.0}%", r.level.name(), r.scale * 100.)).unwrap_or_default(),
+        graphics.remembered.map(|r| format!("; remembered {} at {:.0}%", r.level.name(), r.scale * 100.)).unwrap_or_default()
+            + &graphics.cap.map(|c| format!("; a replay on a phone: no better than {} at {:.0}%", c.level.name(), c.scale * 100.)).unwrap_or_default(),
     );
     commands.insert_resource(detail);
     report(&graphics, &detail);
@@ -2105,6 +2141,33 @@ mod tests {
         let (_, later) = run_busy(&mut governor, now, 300., |_, r| (vsync(cost(r)), Some(3.)));
         assert!(later.len() <= 4, "no oscillation: {later:?}");
         assert_eq!(governor.rung, settled);
+    }
+
+    /// A replay watched on a phone keeps to the device's start: a fast game climbs no higher than it, and a slow one
+    /// still comes down; elsewhere, and in the game itself, nothing is capped.
+    #[test]
+    fn a_replay_on_a_phone_never_climbs_above_the_devices_start() {
+        let (rungs, _) = rungs();
+        let cap = rungs[rungs.len() / 2];
+        let last = *rungs.last().unwrap();
+        let mut governor = Governor { cap: Some(cap), ..Governor::new(last, Shape::new(1., true), 0.) };
+        let (now, moves) = run(&mut governor, 0., 600., |_, _| 6.);
+        assert!(!moves.is_empty(), "it climbs to the cap");
+        assert!(moves.iter().all(|(_, r)| !above(*r, cap)), "never past the cap: {moves:?}");
+        assert!(same(governor.rung, cap) || !above(up(governor.rung, Shape::new(1., true)).unwrap(), cap), "{moves:?}");
+        let (_, down) = run(&mut governor, now, 60., |_, _| 40.);
+        assert!(down.iter().any(|(_, r)| above(cap, *r)), "and still steps down: {down:?}");
+
+        let low = Rung { level: Level::Low, scale: 0.5 };
+        assert_eq!(viewer_cap(Class::Phone, true, low), Some(low));
+        assert_eq!(viewer_cap(Class::Phone, false, low), None, "the game itself is not capped");
+        assert_eq!(viewer_cap(Class::Apple, true, low), None, "nor a viewer elsewhere");
+        // A remembered rung above the cap starts at the cap; one below it stays.
+        assert_eq!(within(Rung { level: Level::High, scale: 1. }, Some(low)), low);
+        assert_eq!(within(Rung { level: Level::Low, scale: 0.8 }, Some(low)), low);
+        let lower = Rung { level: Level::Lowest, scale: 0.7 };
+        assert_eq!(within(lower, Some(low)), lower);
+        assert_eq!(within(lower, None), lower);
     }
 
     #[test]

@@ -32,6 +32,40 @@ const EDGE: Color = Color::srgba(1., 1., 1., 0.10);
 /// Seconds a damage number rises for, and a tracer lingers.
 const NUMBER_TIME: f64 = 1.2;
 const TRACER_TIME: f64 = 2.5;
+/// The stats' columns and their widths (at a 720-pixel window).
+const STATS_HEADS: [&str; 11] = ["PLAYER", "K", "D", "SCORE", "HP", "WEAPON", "AMMO", "ACCURACY", "DEALT", "TAKEN", "STREAK"];
+const STATS_WIDTHS: [f32; 11] = [120., 30., 30., 50., 46., 150., 64., 104., 52., 52., 64.];
+/// The columns a narrow window keeps: the player to the ammunition, or on a phone held upright the player, the kills,
+/// the deaths, the score and the health.
+const STATS_NARROW: usize = 7;
+const STATS_FEWEST: usize = 5;
+/// The least scale the stats are drawn at on a narrow window (a phone's screen scale is 0.6, too small to read there).
+const STATS_LEGIBLE: f32 = 0.9;
+
+/// Where the stats card begins, from the middle of the window (its panel's place): centred with every column; with
+/// fewer (a narrow window, a phone held upright) at the left, 8 px in, since a phone held upright draws a little
+/// wider than it shows and the right edge is the one cut off.
+pub fn card_left(columns: usize, width: f32, window: f32) -> Val {
+    if columns < STATS_HEADS.len() { Val::Px((8. - window / 2.).round()) } else { Val::Px((-width / 2.).round()) }
+}
+/// The stats in a window `window` wide at `scale`: how many columns, and the scale they are drawn at. Every column at
+/// the screen's scale where they fit; on a narrower window as many of the first columns as fit at a legible size, with
+/// a margin (a phone held upright draws a little more than it shows at the sides), and at the fewest made smaller to
+/// fit if need be.
+pub fn stats_fit(scale: f32, window: f32) -> (usize, f32) {
+    let room = (window - 16.).max(100.);
+    let width = |n: usize| STATS_WIDTHS[..n].iter().sum::<f32>() + 36.;
+    if width(STATS_HEADS.len()) * scale <= room {
+        return (STATS_HEADS.len(), scale);
+    }
+    let legible = scale.max(STATS_LEGIBLE);
+    for n in [STATS_NARROW, STATS_FEWEST] {
+        if width(n) * legible <= room * 0.92 {
+            return (n, legible);
+        }
+    }
+    (STATS_FEWEST, (room * 0.92 / width(STATS_FEWEST)).max(scale * 0.5))
+}
 
 /// What a click on the viewer does.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -73,11 +107,16 @@ struct TracerMesh;
 #[derive(Component)]
 struct Dot;
 
-/// What was built, and what it was built for.
+/// What was built, and what it was built for: the screen's scale and width, and the replay as it stood (loaded, failed,
+/// and whether the page's touch controls have the bar instead: page.rs). The title, the note, the timeline's markers
+/// and the map's place are built from the replay, so the screen is built again when its file comes (in a browser some
+/// frames after the first, when the screen already says it is loading) or cannot be played.
 #[derive(Default)]
 pub struct Built {
     root: Option<Entity>,
     scale: f32,
+    width: f32,
+    state: (bool, bool, bool),
     stats: String,
     hidden: Vec<Entity>,
     dragging: bool,
@@ -92,6 +131,15 @@ const WIDTH: f32 = 640.;
 /// 800 wide), so that everything fits.
 pub fn scale_of(world: &mut World) -> f32 {
     world.query::<&Window>().iter(world).next().map_or(1., |w| (w.height() / 720.).min(w.width() / 1280.).clamp(0.6, 3.))
+}
+/// The window's width (logical pixels; 1280 with none).
+fn width_of(world: &mut World) -> f32 {
+    world.query::<&Window>().iter(world).next().map_or(1280., |w| w.width())
+}
+/// The bar's width at `scale` in a window `width` wide: WIDTH, or less where the window is narrower (a phone held
+/// upright), with a margin either side.
+pub fn bar_width(scale: f32, width: f32) -> f32 {
+    WIDTH.min(((width - 24.) / scale.max(0.1)).max(200.))
 }
 /// `m:ss`, or `h:mm:ss`.
 pub fn time(ms: f64) -> String {
@@ -120,16 +168,19 @@ pub fn pointer_over(world: &mut World) -> bool {
 /// Every frame after the camera: the screen built once and brought up to date, and its clicks heard.
 pub fn draw(world: &mut World, mut built: Local<Built>) {
     let scale = scale_of(world);
+    let width = width_of(world);
     let Some(mut v) = world.remove_resource::<Viewer>() else { return };
-    if built.root.is_none_or(|r| world.get_entity(r).is_err()) || (built.scale - scale).abs() > 0.01 {
+    let state = (v.replay.is_some(), v.failed.is_some(), super::page::controls());
+    if built.root.is_none_or(|r| world.get_entity(r).is_err()) || (built.scale - scale).abs() > 0.01 || (built.width - width).abs() > 0.5 || built.state != state {
         if let Some(root) = built.root.take()
             && let Ok(e) = world.get_entity_mut(root)
         {
             e.despawn();
         }
-        built.root = Some(build(world, &v, scale));
-        built.scale = scale;
+        built.root = Some(build(world, &v, scale, width, state.2));
+        (built.scale, built.width, built.state) = (scale, width, state);
         built.stats.clear();
+        built.map.clear();
     }
     clicks(world, &mut v, &mut built);
     refresh(world, &v, &mut built, scale);
@@ -175,9 +226,11 @@ fn button(world: &mut World, scale: f32, hit: Hit, words: &str, width: f32) -> E
     e
 }
 
-/// The screen, built once (and again when the window's height changes).
-fn build(world: &mut World, v: &Viewer, scale: f32) -> Entity {
+/// The screen, built once (and again when the window's size changes, the replay comes or cannot be played, or the
+/// page's touch controls take over the bar: `paged`, when the bottom is the page's, page.rs).
+fn build(world: &mut World, v: &Viewer, scale: f32, window: f32, paged: bool) -> Entity {
     let s = scale;
+    let wide = bar_width(s, window);
     let root = world
         .spawn((Root, Name::new("Replay"), Node { position_type: PositionType::Absolute, left: Val::Px(0.), top: Val::Px(0.), width: Val::Percent(100.), height: Val::Percent(100.), ..default() }, FocusPolicy::Pass, GlobalZIndex(60)))
         .id();
@@ -188,15 +241,7 @@ fn build(world: &mut World, v: &Viewer, scale: f32) -> Entity {
     let badge = world.spawn((Node { padding: UiRect::axes(px(s, 8.), px(s, 3.)), border_radius: BorderRadius::all(px(s, 4.)), align_self: AlignSelf::FlexStart, ..default() }, BackgroundColor(ACCENT))).id();
     let badge_text = text(world, s, "REPLAY", 12., ON_ACCENT);
     world.entity_mut(badge).add_child(badge_text);
-    let title = match &v.replay {
-        Some(r) => {
-            let h = &r.header;
-            let (y, m, d, hh, mm, _) = super::store::civil(h.started);
-            ascii(&format!("{}  /  {}  /  {y}-{m:02}-{d:02} {hh:02}:{mm:02}", h.map_name, mode_name(&h.mode, &h.rules)))
-        }
-        None => v.failed.clone().map_or("LOADING THE REPLAY...".into(), |_| "THE REPLAY CANNOT BE PLAYED".into()),
-    };
-    let title = text(world, s, &title, 13., WHITE);
+    let title = text(world, s, &title(v), 13., WHITE);
     world.entity_mut(top).add_children(&[badge, title]);
     if let Some(w) = v.warning.as_ref().or(v.failed.as_ref()) {
         let note = world.spawn((Live::Note, Text::new(ascii(w)), font(s, 12.), TextColor(if v.failed.is_some() { RED } else { ACCENT }), Node { max_width: px(s, 560.), ..default() })).id();
@@ -205,7 +250,10 @@ fn build(world: &mut World, v: &Viewer, scale: f32) -> Entity {
     // The bottom middle (clear of the head-up display's corners): whose view, then the bar: the time and the timeline over
     // the buttons.
     let bottom = world
-        .spawn((Node { position_type: PositionType::Absolute, left: Val::Percent(50.), bottom: px(s, 12.), width: px(s, WIDTH), margin: UiRect::left(px(s, -WIDTH / 2.)), flex_direction: FlexDirection::Column, row_gap: px(s, 6.), ..default() },))
+        .spawn((
+            Node { position_type: PositionType::Absolute, left: Val::Percent(50.), bottom: px(s, 12.), width: px(s, wide), margin: UiRect::left(px(s, -wide / 2.)), flex_direction: FlexDirection::Column, row_gap: px(s, 6.), ..default() },
+            if paged { Visibility::Hidden } else { Visibility::Inherited },
+        ))
         .id();
     let who_row = world
         .spawn((Node { align_items: AlignItems::Center, align_self: AlignSelf::Center, column_gap: px(s, 8.), padding: UiRect::all(px(s, 4.)), border_radius: BorderRadius::all(px(s, 8.)), ..default() }, BackgroundColor(PANEL)))
@@ -255,12 +303,12 @@ fn build(world: &mut World, v: &Viewer, scale: f32) -> Entity {
         kids.push(b);
     }
     let gap = world.spawn(Node { flex_grow: 1., ..default() }).id();
-    let view = button(world, s, Hit::View, "FIRST PERSON", 116.);
+    let view = button(world, s, Hit::View, "FIRST PERSON", if wide < WIDTH { 96. } else { 116. });
     world.entity_mut(view).insert(Live::View);
     let stats = button(world, s, Hit::Stats, "STATS", 56.);
     let help = button(world, s, Hit::Help, "?", 28.);
     kids.extend([gap, view, stats, help]);
-    let buttons = world.spawn(Node { align_items: AlignItems::Center, column_gap: px(s, 6.), ..default() }).id();
+    let buttons = world.spawn(Node { align_items: AlignItems::Center, column_gap: px(s, 6.), flex_wrap: FlexWrap::Wrap, row_gap: px(s, 4.), ..default() }).id();
     world.entity_mut(buttons).add_children(&kids);
     world.entity_mut(bar).add_children(&[top_row, buttons]);
     world.entity_mut(bottom).add_children(&[who_row, bar]);
@@ -340,12 +388,15 @@ fn clicks(world: &mut World, v: &mut Viewer, built: &mut Built) {
     let pressed: Vec<Hit> = world.query::<(&Hit, &Interaction)>().iter(world).filter(|(_, i)| **i == Interaction::Pressed).map(|(h, _)| *h).collect();
     let mouse = world.resource::<ButtonInput<MouseButton>>().clone();
     let menu = world.get_resource::<crate::menu::Menu>().is_some_and(|m| m.open);
-    let just = mouse.just_pressed(MouseButton::Left) && !menu;
-    // A press on the timeline seeks, and so does dragging along it until the button is let go.
+    // (A finger is the left button: Bevy's UI takes a touch as a press, the bar as well. On a phone the page's own
+    // controls usually have the bar instead: page.rs.)
+    let (touched, touching) = world.get_resource::<Touches>().map_or((false, false), |t| (t.any_just_pressed(), t.iter().next().is_some()));
+    let just = (mouse.just_pressed(MouseButton::Left) || touched) && !menu;
+    // A press on the timeline seeks, and so does dragging along it until the button (or the finger) is let go.
     if just && pressed.contains(&Hit::Timeline) {
         built.dragging = true;
     }
-    if !mouse.pressed(MouseButton::Left) || menu {
+    if !(mouse.pressed(MouseButton::Left) || touching) || menu {
         built.dragging = false;
     }
     if built.dragging {
@@ -370,15 +421,37 @@ fn clicks(world: &mut World, v: &mut Viewer, built: &mut Built) {
             }
             Hit::Stats => v.show.stats = !v.show.stats,
             Hit::Help => v.show.help = !v.show.help,
-            Hit::Previous | Hit::Next => {
-                let players = v.players();
-                if let Some(at) = players.iter().position(|id| *id == v.watched) {
-                    let n = players.len();
-                    v.watched = players[if hit == Hit::Next { (at + 1) % n } else { (at + n - 1) % n }];
-                }
-            }
+            Hit::Previous | Hit::Next => v.step_player(if hit == Hit::Next { 1 } else { -1 }),
             Hit::Timeline => {}
         }
+    }
+}
+
+/// Whose view it is and how (`WATCHING NAME  2/5  /  RECORDED VIEW`), or nothing before the first frame.
+pub fn watching(v: &Viewer) -> String {
+    let Some(seat) = v.frame.as_ref().and_then(|f| f.players.iter().find(|p| p.player.id == v.watched)) else { return String::new() };
+    let players = v.players();
+    let place = players.iter().position(|id| *id == v.watched).map_or(0, |i| i + 1);
+    let p = &seat.player;
+    let state = if !p.alive { "  (DOWN)" } else { "" };
+    let mode = if v.mode == Mode::Fly { "FREE CAMERA  /  LAST WATCHED " } else if v.mode == Mode::Follow { "FOLLOWING " } else { "WATCHING " };
+    // In first person: the player's own view as its screen drew it, or one worked out from the recording.
+    let how = match v.mode {
+        Mode::First if v.recorded() => "  /  RECORDED VIEW",
+        Mode::First => "  /  RECONSTRUCTED",
+        _ => "",
+    };
+    format!("{mode}{}  {place}/{}{state}{how}", ascii(&p.name), players.len())
+}
+/// What the replay is (the map, the mode, when), as the top left says it.
+pub fn title(v: &Viewer) -> String {
+    match &v.replay {
+        Some(r) => {
+            let h = &r.header;
+            let (y, m, d, hh, mm, _) = super::store::civil(h.started);
+            ascii(&format!("{}  /  {}  /  {y}-{m:02}-{d:02} {hh:02}:{mm:02}", h.map_name, mode_name(&h.mode, &h.rules)))
+        }
+        None => v.failed.clone().map_or("LOADING THE REPLAY...".into(), |_| "THE REPLAY CANNOT BE PLAYED".into()),
     }
 }
 
@@ -388,23 +461,7 @@ fn refresh(world: &mut World, v: &Viewer, built: &mut Built, s: f32) {
     let part = if duration > 0. { (v.clock / duration).clamp(0., 1.) as f32 * 100. } else { 0. };
     let watched = v.frame.as_ref().and_then(|f| f.players.iter().find(|p| p.player.id == v.watched));
     let forts = v.frame.as_ref().is_some_and(|f| f.forts.is_some());
-    let players = v.players();
-    let place = players.iter().position(|id| *id == v.watched).map_or(0, |i| i + 1);
-    let who = match watched {
-        Some(seat) => {
-            let p = &seat.player;
-            let state = if !p.alive { "  (DOWN)" } else { "" };
-            let mode = if v.mode == Mode::Fly { "FREE CAMERA  /  LAST WATCHED " } else if v.mode == Mode::Follow { "FOLLOWING " } else { "WATCHING " };
-            // In first person: the player's own view as its screen drew it, or one worked out from the recording.
-            let how = match v.mode {
-                Mode::First if v.recorded() => "  /  RECORDED VIEW",
-                Mode::First => "  /  RECONSTRUCTED",
-                _ => "",
-            };
-            format!("{mode}{}  {place}/{}{state}{how}", ascii(&p.name), players.len())
-        }
-        None => String::new(),
-    };
+    let who = watching(v);
     let colour = watched.map_or(WHITE, |seat| tint(&seat.player, forts, &seat.color));
     let mut live = world.query::<(&Live, Option<&mut Text>, Option<&mut Node>, Option<&mut BackgroundColor>, Option<&mut Visibility>)>();
     for (which, text, node, bg, vis) in live.iter_mut(world) {
@@ -525,28 +582,33 @@ fn stats(world: &mut World, v: &Viewer, built: &mut Built, s: f32) {
             (l.id == v.watched, color, cells)
         })
         .collect();
-    let sig = format!("{s}{:?}", rows.iter().map(|r| (r.0, &r.2)).collect::<Vec<_>>());
+    // A window too narrow for every column (a phone) has the first seven, as large as fit.
+    let window = width_of(world);
+    let (columns, s) = stats_fit(s, window);
+    let sig = format!("{s}{columns}{:?}", rows.iter().map(|r| (r.0, &r.2)).collect::<Vec<_>>());
     if sig == built.stats {
         return;
     }
     built.stats = sig;
+    let rows: Vec<(bool, Color, Vec<String>)> = rows.into_iter().map(|(lit, color, mut cells)| {
+        cells.truncate(columns);
+        (lit, color, cells)
+    }).collect();
     let kids: Vec<Entity> = world.get::<Children>(panel).map(|c| c.iter().collect()).unwrap_or_default();
     for kid in kids {
         world.entity_mut(kid).despawn();
     }
-    const HEADS: [&str; 11] = ["PLAYER", "K", "D", "SCORE", "HP", "WEAPON", "AMMO", "ACCURACY", "DEALT", "TAKEN", "STREAK"];
-    const WIDTHS: [f32; 11] = [120., 30., 30., 50., 46., 150., 64., 104., 52., 52., 64.];
-    let width: f32 = WIDTHS.iter().sum::<f32>() + 36.;
+    let width: f32 = STATS_WIDTHS[..columns].iter().sum::<f32>() + 36.;
     let card = world
         .spawn((
-            Node { flex_direction: FlexDirection::Column, row_gap: px(s, 2.), padding: UiRect::all(px(s, 14.)), margin: UiRect::left(px(s, -width / 2.)), width: px(s, width), border_radius: BorderRadius::all(px(s, 10.)), ..default() },
+            Node { flex_direction: FlexDirection::Column, row_gap: px(s, 2.), padding: UiRect::all(px(s, 14.)), margin: UiRect::left(card_left(columns, s * width, window)), width: px(s, width), border_radius: BorderRadius::all(px(s, 10.)), ..default() },
             BackgroundColor(Color::srgba(0.035, 0.042, 0.052, 0.97)),
         ))
         .id();
     let row = |world: &mut World, cells: &[String], color: Color, size: f32, lit: bool, swatch: Option<Color>| -> Entity {
         let r = world.spawn((Node { align_items: AlignItems::Center, padding: UiRect::axes(px(s, 4.), px(s, 3.)), border_radius: BorderRadius::all(px(s, 4.)), ..default() }, BackgroundColor(if lit { Color::srgba(1.0, 0.80, 0.30, 0.18) } else { Color::NONE }))).id();
         for (i, cell) in cells.iter().enumerate() {
-            let c = world.spawn(Node { width: px(s, WIDTHS[i]), align_items: AlignItems::Center, column_gap: px(s, 6.), ..default() }).id();
+            let c = world.spawn(Node { width: px(s, STATS_WIDTHS[i]), align_items: AlignItems::Center, column_gap: px(s, 6.), ..default() }).id();
             if i == 0
                 && let Some(sw) = swatch
             {
@@ -560,14 +622,15 @@ fn stats(world: &mut World, v: &Viewer, built: &mut Built, s: f32) {
         r
     };
     let title = text(world, s, &format!("STATS AT {}", time(v.clock)), 15., ACCENT);
-    let heads: Vec<String> = HEADS.iter().map(|h| h.to_string()).collect();
+    let heads: Vec<String> = STATS_HEADS[..columns].iter().map(|h| h.to_string()).collect();
     let head_row = row(world, &heads, FAINT, 10., false, None);
     world.entity_mut(card).add_children(&[title, head_row]);
     for (lit, color, cells) in &rows {
         let r = row(world, cells, WHITE, 12., *lit, Some(*color));
         world.entity_mut(card).add_child(r);
     }
-    let note = text(world, s, "ACCURACY: HITS ON HOTDOGS FOR EVERY ROUND FIRED OR SWING. DAMAGE TO CATS IS NOT IN A RECORDING.", 9., FAINT);
+    let note = if columns < STATS_HEADS.len() { "WIDER SCREEN (TURN THE PHONE): ACCURACY, DAMAGE AND STREAKS" } else { "ACCURACY: HITS ON HOTDOGS FOR EVERY ROUND FIRED OR SWING. DAMAGE TO CATS IS NOT IN A RECORDING." };
+    let note = text(world, s, note, 9., FAINT);
     world.entity_mut(card).add_child(note);
     world.entity_mut(panel).add_child(card);
 }

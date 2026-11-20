@@ -4,7 +4,7 @@
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-import {line,SWATCH,COLOURS,header,sides,WISHES,nextGame,options,holds,MODES,MODE_NAME,modeText,asked,choosing,CARDS_MAP,KUNGFU_MAP,replayText,replayRow,replayHref,replayLength} from '../lobby.js';
+import {line,SWATCH,COLOURS,header,sides,WISHES,nextGame,options,holds,MODES,MODE_NAME,modeText,asked,choosing,CARDS_MAP,KUNGFU_MAP,replayText,replayRow,replayHref,replayLength,trailNote,trailLine,TRAIL,replayStart,lightAddress,fullAddress,replayTrouble,REPLAY_GUARD,REPLAY_RECENT} from '../lobby.js';
 
 test('the page shows names and chat as text, never as markup',()=>{
  // A stand-in for the document: elements only take text, classes and children, as the real ones are used.
@@ -140,4 +140,43 @@ test('replays: the server\'s list as rows of text, each watched with ?replay= an
  assert.ok(texts[0].includes(evil)&&texts[1].includes(evil),'names and maps as text content');
  const links=flat(row).filter(e=>e.tag==='a');assert.deepEqual(links.map(a=>a.href),[`?replay=${entry.id}`,`replays/${entry.id}`]);
  assert.equal(flat(replayRow(doc,{...entry,id:'"><script>'})).filter(e=>e.tag==='a').length,0,'no link for an id that is not one');
+});
+
+test('a replay that ended the page plays in light mode next time, and is not started again by itself if it ends it there too', ()=>{
+ const now=1_800_000_000_000,id='20261120-112428-countertop-fort',note=(over)=>JSON.stringify({id,at:now-60e3,light:false,...over});
+ assert.equal(REPLAY_GUARD,'hotdog-replay-open');
+ assert.equal(replayStart(null,id,false,now),'normal','nothing kept: as it is');
+ assert.equal(replayStart(note(),id,false,now),'light','the note left: the page was ended while it played');
+ assert.equal(replayStart(note({light:true}),id,true,now),'stop','ended in light mode too');
+ assert.equal(replayStart(note(),id,true,now),'light','light mode asked for, after an end in the full one');
+ assert.equal(replayStart(null,id,true,now),'light','light mode asked for');
+ assert.equal(replayStart(note({id:'another'}),id,false,now),'normal','another replay\'s note');
+ assert.equal(replayStart(note({at:now-REPLAY_RECENT-1}),id,false,now),'normal','long ago');
+ assert.equal(replayStart('{not json',id,false,now),'normal');assert.equal(replayStart('7',id,false,now),'normal');
+});
+
+test('light mode is WebGL 2 at the lowest graphics, the replay and the rest of the address kept; full quality takes it back', ()=>{
+ const light=new URLSearchParams(lightAddress('?replay=abc&webgpu&scale=90&mp'));
+ assert.deepEqual([light.get('replay'),light.has('webgl2'),light.has('webgpu'),light.get('quality'),light.has('light'),light.has('scale'),light.has('mp')],['abc',true,false,'lowest',true,false,true]);
+ assert.ok(!lightAddress('?replay=abc').includes('light='),'bare words stay bare');
+ assert.equal(fullAddress(lightAddress('?replay=abc')),'?replay=abc');
+});
+
+test('a replay that cannot be played is said so by its kind, with a retry only where one may help', ()=>{
+ assert.deepEqual(replayTrouble('missing'),['Replay not found',false]);
+ assert.equal(replayTrouble('network')[1],true);assert.equal(replayTrouble('version')[1],false);assert.equal(replayTrouble('memory')[1],true);
+ assert.equal(replayTrouble('anything else')[0],'This replay cannot be played');
+});
+
+test('a page that was ended says what it was doing', () => {
+ assert.equal(TRAIL,'hotdog-trail');
+ const note=trailNote({now:5,up:11.4,what:'replay',readout:' 58 FPS  ·  WebGPU · Auto · Low · 45% ',canvas:'578x1250',screen:'428x926 at 3x',memory:412*2**20,replay:{state:'playing',clock:10400}});
+ assert.deepEqual(note,{at:5,up:11,what:'replay',readout:'58 FPS · WebGPU · Auto · Low · 45%',canvas:'578x1250',screen:'428x926 at 3x',mb:412,state:'playing',clock:10});
+ assert.equal(trailLine(JSON.stringify(note)),'ended 11 s after loading, at 0:10 of the replay, 58 FPS · WebGPU · Auto · Low · 45%, drawing 578x1250, screen 428x926 at 3x, memory 412 MB');
+ // A replay whose file had not come, and the game itself: said so; what is not known is left out.
+ assert.equal(trailLine(trailNote({now:1,up:3,what:'replay',replay:{state:'loading'}})),'ended 3 s after loading, the replay loading');
+ assert.equal(trailLine(trailNote({now:1,up:75.2,what:'game',readout:'60 FPS',memory:NaN})),'ended 75 s after loading, in the game, 60 FPS');
+ assert.equal(trailLine(trailNote({now:1,up:2,what:'replay',replay:{state:'playing',clock:125000}})),'ended 2 s after loading, at 2:05 of the replay');
+ // Nothing kept, or something else under the name: nothing said.
+ for(const none of [null,undefined,'','{','[]','"x"','{"up":"soon"}',7])assert.equal(trailLine(none),'');
 });

@@ -91,6 +91,40 @@ export const replayText=entry=>{const mode=MODE_NAME[entry?.mode]??MODE_NAME.sie
  return {title:`${date} · ${String(entry?.map??'')} · ${mode} · ${replayLength(entry?.duration)}`,detail:`${entry?.winner?`${entry.winner} won · `:''}${who}${entry?.complete===false?' · cut short':''}`}};
 /** The address that watches a replay of the server's: only an id the server could have made (letters, digits, - and _). */
 export const replayHref=id=>/^[A-Za-z0-9_-]{1,96}$/.test(String(id))?`?replay=${id}`:null;
+/** A replay that stopped the page. A phone's browser ends a page that runs out of memory and loads it again (iOS Safari,
+ * twice, then "A problem repeatedly occurred"), and a page cannot hear itself end. So index.html keeps a note while a
+ * replay is open (REPLAY_GUARD in local storage: its id, when, and whether in light mode), and takes it away when the page
+ * is left as pages are left. A note still there when the same replay opens again, lately, says that the page was ended:
+ * then the replay plays in light mode (lightAddress: WebGL 2 and the lowest graphics, with ?light), and if it was ended
+ * in light mode too it is not started again by itself. What to do on opening replay `id`, from the note (`stored`, as
+ * kept), in light mode or not, at `now` (ms): 'normal', 'light' or 'stop'. */
+export const REPLAY_GUARD='hotdog-replay-open',REPLAY_RECENT=15*60e3;
+export function replayStart(stored,id,light,now){let last=null;try{last=JSON.parse(stored||'null')}catch{}
+ const ended=!!last&&typeof last==='object'&&last.id===id&&Math.abs(now-Number(last.at))<REPLAY_RECENT;
+ if(!ended)return light?'light':'normal';
+ return light&&last.light?'stop':'light'}
+const address=q=>'?'+q.toString().replace(/=(&|$)/g,'$1');
+/** The address of a replay's light mode, and back (what light mode added taken away again). */
+export function lightAddress(search){const q=new URLSearchParams(search);q.delete('webgpu');q.delete('scale');for(const [k,v] of [['light',''],['webgl2',''],['quality','lowest']])q.set(k,v);return address(q)}
+export function fullAddress(search){const q=new URLSearchParams(search);for(const k of ['light','webgl2','quality'])q.delete(k);return address(q)}
+/** What the page notes of itself every two seconds while it is shown (index.html), so that a page a phone's browser ended
+ * without a word can say, the next time, what it was doing: `trailNote` makes the note (seconds since it loaded, a replay
+ * or the game, the frame-rate line, what is drawn and on what, the game's memory, a replay's clock), `trailLine` the line
+ * a message shows of one as kept ('' for none, or one that says nothing). Nothing of it leaves the device. */
+export const TRAIL='hotdog-trail';
+export function trailNote({now,up,what,readout,canvas,screen,memory,replay}){const note={at:now,up:Math.round(up),what:what==='replay'?'replay':'game',
+  readout:String(readout??'').replace(/\s+/g,' ').trim().slice(0,90),canvas:String(canvas??'').slice(0,24),screen:String(screen??'').slice(0,32)};
+ if(Number.isFinite(memory))note.mb=Math.round(memory/2**20);
+ if(replay&&typeof replay==='object'){note.state=String(replay.state??'').slice(0,12);if(Number.isFinite(replay.clock))note.clock=Math.round(replay.clock/1000)}
+ return note}
+export function trailLine(stored){let n=stored;if(typeof stored==='string'){try{n=JSON.parse(stored)}catch{return ''}}
+ if(!n||typeof n!=='object'||!Number.isFinite(n.up))return '';
+ const clock=Number.isFinite(n.clock)?`at ${Math.floor(n.clock/60)}:${String(Math.floor(n.clock%60)).padStart(2,'0')} of the replay`:n.what==='replay'?`the replay ${n.state||'not started'}`:'in the game';
+ return [`ended ${n.up} s after loading`,clock,n.readout,n.canvas&&`drawing ${n.canvas}`,n.screen&&`screen ${n.screen}`,Number.isFinite(n.mb)&&`memory ${n.mb} MB`].filter(Boolean).join(', ')}
+/** What the page says of a replay that cannot be played (src/replay/page.rs names the kind; `memory`: the game stopped
+ * while it played): a title, and whether trying again may help. */
+export function replayTrouble(kind){return ({missing:['Replay not found',false],network:['The replay did not download',true],server:['The server could not send the replay',true],
+ version:['This replay is from another version of the game',false],damaged:['This replay is damaged',false],memory:['The replay stopped',true]})[kind]??['This replay cannot be played',true]}
 /** One replay's row as an element: everything the server sent is set as text, the links only for an id that is one. */
 export function replayRow(doc,entry){const row=doc.createElement('li'),words=doc.createElement('span'),title=doc.createElement('b'),detail=doc.createElement('i'),{title:t,detail:d}=replayText(entry);
  row.className='replay';title.textContent=t;detail.textContent=d;words.append(title,detail);row.append(words);const href=replayHref(entry?.id);
