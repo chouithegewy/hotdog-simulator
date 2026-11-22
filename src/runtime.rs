@@ -71,10 +71,10 @@ impl Options {
             let demo = args.iter().any(|s| s == "--demo");
             Self {
                 // Multiplayer starts in the lobby, never with the breakfast scene.
-                skip_intro: demo || args.iter().any(|s| s == "--skip-intro") || args.iter().any(|s| s == "--connect") || vr_knob("intro").as_deref() == Some("0"),
+                skip_intro: demo || args.iter().any(|s| s == "--skip-intro") || args.iter().any(|s| s == "--connect") || vr_knob("intro").as_deref() == Some("0") || vr_knob("connect").is_some() || online().is_some(),
                 profile: args.iter().any(|s| s == "--profile"),
                 profile_path: value("--profile"),
-                connect: value("--connect"),
+                connect: Some(value("--connect")).filter(|address| !address.is_empty()).or_else(|| vr_knob("connect")).or_else(online).unwrap_or_default(),
                 uncapped: args.iter().any(|s| s == "--uncapped"),
                 demo,
                 map: value("--map"),
@@ -166,6 +166,19 @@ pub fn android() {
         unsafe { std::env::set_var("HOME", &home) };
         let _ = std::env::set_current_dir(&home);
     }
+}
+
+/// The public server, which the menu's PLAY ONLINE joins (menu.rs): the choice is kept in the settings under
+/// [`ONLINE_KEY`] and read at the next start. `HOTDOG_SERVER` names another server.
+pub const PUBLIC_SERVER: &str = "wss://hotdog-simulator.chilos.dev/ws";
+pub const ONLINE_KEY: &str = "online";
+/// The server to join because the menu said so last time, if it did.
+#[cfg(not(target_arch = "wasm32"))]
+fn online() -> Option<String> {
+    let file = crate::prefs::settings_file()?;
+    let text = std::fs::read_to_string(file).ok()?;
+    let on = serde_json::from_str::<serde_json::Value>(&text).ok()?.get(ONLINE_KEY)?.as_str()? == "1";
+    on.then(|| std::env::var("HOTDOG_SERVER").ok().filter(|server| !server.is_empty()).unwrap_or_else(|| PUBLIC_SERVER.into()))
 }
 
 /// A check's switch of the virtual reality build (vr.rs, `knob`); none in any other.

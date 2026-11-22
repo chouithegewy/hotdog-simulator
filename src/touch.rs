@@ -414,13 +414,24 @@ extern "C" {
     fn touch_tell(state: u32);
 }
 fn read() -> Vec<f32> {
+    // The page's touch controls, where they are showing.
     #[cfg(target_arch = "wasm32")]
-    return touch_read();
+    {
+        let page = touch_read();
+        if !page.is_empty() {
+            return page;
+        }
+    }
     // Virtual reality: the controllers are the pad (vr/hands.rs).
     #[cfg(feature = "vr")]
-    return crate::vr::hands::take();
-    #[cfg(all(not(target_arch = "wasm32"), not(feature = "vr")))]
-    Vec::new()
+    {
+        let hands = crate::vr::hands::take();
+        if !hands.is_empty() {
+            return hands;
+        }
+    }
+    // A gamepad, while it is what the game is played with (gamepad.rs).
+    crate::gamepad::take()
 }
 fn tell(state: u32) {
     #[cfg(target_arch = "wasm32")]

@@ -528,7 +528,7 @@ pub fn send(world: &mut World) {
 }
 /// The native client's connection, on a thread of its own: the server's game socket over WebSocket (tungstenite), the
 /// join first, then whatever the game sends (`outgoing`), and everything the server says passed back (`incoming`).
-/// `address` is `--connect`'s HOST:PORT (the socket is ws://HOST:PORT/ws) or a ws:// address. When the connection
+/// `address` is `--connect`'s HOST:PORT (the socket is ws://HOST:PORT/ws) or a ws:// or wss:// address. When the connection
 /// ends, an error message says why.
 #[cfg(not(target_arch = "wasm32"))]
 fn connect(address: String, join: String, outgoing: std::sync::mpsc::Receiver<Outgoing>, incoming: std::sync::mpsc::Sender<Incoming>) {
@@ -536,8 +536,15 @@ fn connect(address: String, join: String, outgoing: std::sync::mpsc::Receiver<Ou
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let url = if address.contains("://") { address } else { format!("ws://{address}/ws") };
     let result = (|| -> Result<(), Error> {
+        // (A wss:// address is TLS: rustls, told once which cryptography it uses.)
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let (mut socket, _) = tungstenite::connect(url.as_str())?;
-        if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        let stream = match socket.get_mut() {
+            MaybeTlsStream::Plain(stream) => Some(stream),
+            MaybeTlsStream::Rustls(tls) => Some(tls.get_mut()),
+            _ => None,
+        };
+        if let Some(stream) = stream {
             stream.set_nodelay(true)?;
             // Reads wait a moment at most, so that what the game sends goes out promptly.
             stream.set_read_timeout(Some(Duration::from_millis(2)))?;

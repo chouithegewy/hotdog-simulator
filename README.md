@@ -57,6 +57,10 @@ Multiplayer in a browser adds two keys: Enter opens the text chat (Enter sends, 
 
 [Titan](#titan)'s, for the player who is the giant, on the keys of what they stand in for (the TITAN tab): swat left button (low while crouched), ground smash right button, stomp F (a low kick while crouched), charge Shift; jump Space and crouch Ctrl or C are everyone's, and V puts the camera behind and above it.
 
+### Gamepad
+
+A gamepad the system knows (an Xbox controller by cable or Bluetooth) plays the game natively and in a browser's native build (`src/gamepad.rs`): left stick walks, right stick looks, the triggers fire and aim, the bumpers use and carry, A jumps, B crouches, X is ready, Y swaps, the sticks pressed are stim and melee, the D-pad is hints, prone, primary and secondary, and Start opens the menu (which the mouse works). SETTINGS has CONTROLLER: AUTO plays with whatever is touched, KEYBOARD + MOUSE never listens to a pad, GAMEPAD always does. A phone's touch controls and a headset's controllers come with the device.
+
 ### Touch
 
 On a phone or a tablet (a touch screen and no mouse) the page lays touch controls over the game; on a computer with a touch screen and a mouse they come up at the first touch, and `?touch` or `?touch=0` in the address turns them on or off whatever the device. Hold the phone sideways; in portrait the same controls stand higher, above the weapon line, and a note suggests turning it.
@@ -500,10 +504,14 @@ cargo run --release --features vr   # at a desk, with a headset's OpenXR runtime
 - **The gun is in the right hand** and fires where the hand points (`src/vr/hands.rs`): a red dot floats on the line of fire. A hand the headset cannot see leaves the aim to the head. The controllers are read as the page's touch controls are (`src/touch.rs`), so every mode's buttons are the ones a phone has.
 - **The head-up display and the menus** are on a screen that floats in front of the player (`src/vr/screen.rs`). It follows the head; with the menu open it stays put, the right hand points at it (a yellow dot) and the trigger clicks.
 - **The view is the player's own.** The game turns the room only where it cuts the view (the film, the fridge between rounds, a death); the right stick turns it in steps, never smoothly.
-- **Graphics** start on the Lowest level on a headset (the menu changes it), and the flat picture is not drawn there (`HOTDOG_VR_MIRROR=1` or `0` says otherwise; at a desk the window shows it).
-- **Known limits**: the cards table of Fully Loaded, the replay viewer's controls and the lobby's look-around take a mouse the screen in the air does not yet give them; name tags and other marks drawn over the world are placed for the flat picture; a map other than the bundled one is not read from the app. The Quest app is not in `tools/build-all.sh`, in CI or in `THIRD_PARTY_LICENSES.html` (which lists what the other packages are made of): it is for trying on one's own headset until it is.
+- **Graphics on a headset** are drawn for its own chip (`src/vr.rs`, `headset`): unlit, with nothing done to the finished picture, eyes three quarters the size the headset asks for and the screen in the air no taller than 720 pixels. Measured on a Quest 2, the Lowest level as the flat game draws it ran 10 frames a second, and this runs the headset's 72 in a round (about 46 while the film's people or the fridge fill the view). The flat picture is not drawn there. At a desk the game is drawn as the flat game is, and the window shows the flat picture.
+- **Online**: the menu's PLAY ONLINE joins the public server from the next start (below, "Multiplayer").
+- **Checks' switches** (`src/vr.rs`, `knob`): `adb shell setprop debug.hotdog.vr "intro=0;timing=1"` and start the app again (at a desk, a file named by `HOTDOG_VR_KNOBS`): `intro=0` skips the film, `timing=1` logs where a frame's time goes, `lit=1` keeps the lighting, `eye=1440x1584` the eyes' size, `connect=wss://...` a server, `headset=1` the headset's graphics at a desk; `bisect` has the ones that switch parts of the picture off.
+- **Known limits**: the cards table of Fully Loaded, the replay viewer's controls and the lobby's look-around take a mouse the screen in the air does not yet give them; name tags and other marks drawn over the world are placed for the flat picture; a map other than the bundled one is not read from the app; a Bluetooth gamepad paired with the headset is not read (gilrs knows no Android). The Quest app is not in `tools/build-all.sh`, in CI or in `THIRD_PARTY_LICENSES.html` (which lists what the other packages are made of): it is for trying on one's own headset until it is.
 
 ## Multiplayer
+
+A native game (and the Quest app) joins a server with `--connect HOST:PORT` (`ws://HOST:PORT/ws`), with a `ws://` or `wss://` address, or from the Esc menu: PLAY ONLINE keeps the choice in the settings, quits, and the next start joins the public server (`wss://hotdog-simulator.chilos.dev/ws`; `HOTDOG_SERVER` names another); PLAY SINGLE PLAYER undoes it. A `wss://` server is TLS (rustls, with Mozilla's roots compiled in).
 
 One program serves everything, on one port: the page, both browser builds and the assets, the map editor, the game's WebSocket, each page's lobby WebSocket and the status. It is written in Rust on the game's own simulation (`crates/server`, binary `hotdog-server`; see [the server](#the-server)):
 

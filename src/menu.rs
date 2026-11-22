@@ -81,6 +81,7 @@ pub enum Page {
 pub enum Confirm {
     Leave,
     ResetAll,
+    Online,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Toggle {
@@ -105,6 +106,8 @@ pub enum Pick {
     Renderer,
     /// Whether the right button holds the scope up or toggles it (settings.rs `scope_toggle`).
     Scope,
+    /// What the game is played with (gamepad.rs).
+    Controller,
 }
 /// What a click on a node does.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -125,6 +128,8 @@ pub enum Hit {
     Reload,
     /// The replays list (replay/list.rs), over the menu.
     Replays,
+    /// A native game: online on the public server from the next start (or single player again), and quits to start.
+    Online(bool),
     /// The licences page, in a new tab (a browser only: natively the menu says where the file is).
     Licences,
 }
@@ -436,6 +441,16 @@ fn clicks(world: &mut World, menu: &mut Menu, mouse: &ButtonInput<MouseButton>, 
     }
     match hit {
         Hit::Resume => close(world, menu, at.capture),
+        Hit::Online(on) => {
+            if menu.confirm.is_some_and(|(c, _)| c == Confirm::Online) {
+                if let Some(mut prefs) = world.get_resource_mut::<crate::prefs::Prefs>() {
+                    prefs.set(crate::runtime::ONLINE_KEY, if on { "1" } else { "0" });
+                }
+                world.write_message(AppExit::Success);
+            } else {
+                menu.confirm = Some((Confirm::Online, now + CONFIRM));
+            }
+        }
         Hit::Open(page) => menu.page = page,
         Hit::Back => menu.page = Page::Main,
         Hit::Leave => {
@@ -571,6 +586,11 @@ fn step(world: &mut World, menu: &mut Menu, pick: Pick, by: i32) {
             }
         }
         Pick::Scope => scope(world),
+        Pick::Controller => {
+            if let Some(mut scheme) = world.get_resource_mut::<crate::gamepad::Scheme>() {
+                *scheme = scheme.step(by);
+            }
+        }
         Pick::Renderer => {
             if let Some(r) = menu.renderer.as_mut().filter(|r| r.locked.is_empty()) {
                 let open: Vec<&(String, String, bool)> = r.items.iter().filter(|i| !i.2).collect();
@@ -1125,13 +1145,26 @@ fn main_page(b: &mut B, menu: &Menu) -> Entity {
     let settings = item(b, Hit::Open(Page::Settings), "SETTINGS", Look::plain(), WHITE, None);
     let controls = item(b, Hit::Open(Page::Controls), "CONTROLS", Look::plain(), WHITE, None);
     let replays = item(b, Hit::Replays, "REPLAYS", Look::plain(), WHITE, None);
+    // A native game goes online, or back to single player, by starting again (a browser's page has its lobby).
+    let online = (!cfg!(target_arch = "wasm32")).then(|| {
+        let sure = menu.confirm.is_some_and(|(c, _)| c == Confirm::Online);
+        let words = match (at.online, sure) {
+            (false, false) => "PLAY ONLINE",
+            (true, false) => "PLAY SINGLE PLAYER",
+            (_, true) => "QUITS: START THE GAME AGAIN. CLICK AGAIN",
+        };
+        item(b, Hit::Online(!at.online), words, Look::plain(), if sure { ACCENT } else { WHITE }, None)
+    });
     let sure = menu.confirm.is_some_and(|(c, _)| c == Confirm::Leave);
     let words = if sure { format!("{}? CLICK AGAIN", leave_words(at.online)) } else { leave_words(at.online).to_string() };
     let quit_look = Look { hover_bg: Color::srgba(1., 0.42, 0.36, 0.14), ..Look::plain() };
     let quit = item(b, Hit::Leave, &words, quit_look, if sure { RED } else { DIM }, None);
     let parting = b.rule(6., 6.);
     let list = b.node(Node { flex_direction: FlexDirection::Column, row_gap: z.px(4.), ..default() });
-    b.with(list, &[resume, settings, controls, replays, parting, quit]);
+    let mut items = vec![resume, settings, controls, replays];
+    items.extend(online);
+    items.extend([parting, quit]);
+    b.with(list, &items);
     head.push(list);
     // How to get back to the game without the mouse.
     let foot = if cfg!(target_arch = "wasm32") {
@@ -1306,6 +1339,10 @@ fn settings_page(b: &mut B, menu: &Menu) -> Entity {
     rows.push(setting(b, "KILL SLOW MOTION", Some(("A MOMENT OF SLOW MOTION WHEN YOUR SHOT KILLS", FAINT)), c));
     let c = chooser(b, Pick::Scope, if s.scope_toggle { "TOGGLE" } else { "HOLD" }, true);
     rows.push(setting(b, "SCOPE", Some(("HOLD THE RIGHT BUTTON TO AIM, OR CLICK ONCE UP AND ONCE DOWN", FAINT)), c));
+    // What the game is played with (gamepad.rs): a pad is listened to when it is touched, always, or never.
+    let scheme = b.world.get_resource::<crate::gamepad::Scheme>().copied().unwrap_or_default();
+    let c = chooser(b, Pick::Controller, scheme.name(), true);
+    rows.push(setting(b, "CONTROLLER", Some(("AUTO PLAYS WITH WHATEVER IS TOUCHED: A GAMEPAD, OR THE KEYS AND THE MOUSE", FAINT)), c));
     rows.push(section(b, "GRAPHICS"));
     // The quality: as the graphics have it (quality.rs); ?quality= in the address holds it.
     let graphics = b.world.get_resource::<crate::quality::Graphics>().map(|g| (g.choice, g.forced.is_some(), g.resolution, g.forced_resolution.is_some(), g.scalable()));

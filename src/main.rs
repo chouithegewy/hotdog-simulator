@@ -20,6 +20,7 @@ mod director;
 mod fight;
 mod forts;
 mod fu;
+mod gamepad;
 mod fridge;
 mod griddle;
 mod hints;
@@ -101,8 +102,6 @@ fn main() {
         .add_plugins({
             let plugins = DefaultPlugins
                 .build()
-                // The game reads no gamepads: without gilrs nobody polls them every frame.
-                .disable::<bevy::gilrs::GilrsPlugin>()
                 .set(AssetPlugin {
                     meta_check: AssetMetaCheck::Never,
                     file_path: runtime::asset_directory(),
@@ -120,6 +119,9 @@ fn main() {
                     }),
                     ..default()
                 });
+            // (Gamepads, gamepad.rs, are read through gilrs, which knows no Android.)
+            #[cfg(target_os = "android")]
+            let plugins = plugins.disable::<bevy::gilrs::GilrsPlugin>();
             // Virtual reality (vr.rs): the same plugins, drawn through OpenXR.
             #[cfg(feature = "vr")]
             let plugins = vr::plugins(plugins);
@@ -130,6 +132,7 @@ fn main() {
         .add_plugins(death::Plugin)
         .add_plugins((viewmodel::Plugin, deathcam::Plugin, forts::Plugin, arena::splatter::Plugin, whip::Plugin))
         .add_plugins(touch::Plugin)
+        .add_plugins(gamepad::Plugin)
         .add_plugins(bake::Plugin)
         .add_plugins(kungfu::Plugin)
         .add_plugins(tags::Plugin)
