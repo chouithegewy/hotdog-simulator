@@ -59,10 +59,15 @@ mod tune;
 mod ultra;
 mod viewmodel;
 mod visuals;
+#[cfg(feature = "vr")]
+mod vr;
 mod weapons;
 mod whip;
 
+// (On Android, the Meta Quest's, `bevy_main` makes the activity's entry point of it: tools/build-quest.sh.)
+#[bevy_main]
 fn main() {
+    runtime::android();
     runtime::check_cpu();
     let options = runtime::Options::read();
     // An invalid map never panics: natively the reason is printed and the game exits; in a browser the
@@ -84,13 +89,13 @@ fn main() {
     } else {
         bevy::window::PresentMode::AutoVsync
     };
-    App::new()
-        .insert_resource(lobby::Lobby::new(&options))
+    let mut app = App::new();
+    app.insert_resource(lobby::Lobby::new(&options))
         .insert_resource(options)
         .insert_resource(level::MapTheme(map.theme.clone()))
         .insert_resource(level::StartMap(map))
-        .add_plugins(
-            DefaultPlugins
+        .add_plugins({
+            let plugins = DefaultPlugins
                 .build()
                 // The game reads no gamepads: without gilrs nobody polls them every frame.
                 .disable::<bevy::gilrs::GilrsPlugin>()
@@ -110,8 +115,12 @@ fn main() {
                         ..default()
                     }),
                     ..default()
-                }),
-        )
+                });
+            // Virtual reality (vr.rs): the same plugins, drawn through OpenXR.
+            #[cfg(feature = "vr")]
+            let plugins = vr::plugins(plugins);
+            plugins
+        })
         .add_plugins(player_model::bend::Plugin)
         .add_plugins(visuals::VisualsPlugin)
         .add_plugins(death::Plugin)
@@ -136,7 +145,10 @@ fn main() {
         .add_plugins(cards::CardsPlugin)
         .add_plugins(replay::Plugin)
         // `--ultra`, `--raytraced`, `--meshlets`: the native Ultra tier (README); nothing without them.
-        .add_plugins(ultra::Plugin)
+        .add_plugins(ultra::Plugin);
+    #[cfg(feature = "vr")]
+    app.add_plugins(vr::Plugin);
+    app
         .insert_resource(ClearColor(Color::srgb(0.006, 0.009, 0.014)))
         .init_resource::<telemetry::Telemetry>()
         .init_resource::<network::Network>()

@@ -416,7 +416,10 @@ extern "C" {
 fn read() -> Vec<f32> {
     #[cfg(target_arch = "wasm32")]
     return touch_read();
-    #[cfg(not(target_arch = "wasm32"))]
+    // Virtual reality: the controllers are the pad (vr/hands.rs).
+    #[cfg(feature = "vr")]
+    return crate::vr::hands::take();
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "vr")))]
     Vec::new()
 }
 fn tell(state: u32) {

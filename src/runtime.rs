@@ -157,6 +157,17 @@ impl Options {
     }
 }
 
+/// On Android the app has no home and no working directory it can write to: its own data directory is its home, so
+/// the settings (prefs.rs) and the replays are kept there. Before anything else, while there is one thread.
+pub fn android() {
+    #[cfg(target_os = "android")]
+    if let Some(home) = bevy::android::ANDROID_APP.get().and_then(|app| app.internal_data_path()) {
+        // SAFETY: the first thing `main` does, before any other thread is started.
+        unsafe { std::env::set_var("HOME", &home) };
+        let _ = std::env::set_current_dir(&home);
+    }
+}
+
 pub fn asset_directory() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     if let Ok(exe) = std::env::current_exe() {

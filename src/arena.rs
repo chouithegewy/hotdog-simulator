@@ -1946,6 +1946,23 @@ pub fn tick(world: &mut World) {
             g.yaw -= motion.x * sensitivity;
             g.pitch = (g.pitch - motion.y * sensitivity).clamp(-1.48, 1.48);
         }
+        // Virtual reality: the gun points where the hand points (vr/hands.rs), and the room knows that the player
+        // has the view (vr.rs).
+        #[cfg(feature = "vr")]
+        if !table && !dead && let Some(mut stage) = world.get_resource_mut::<crate::vr::Stage>() {
+            stage.played = true;
+            // Given the view (a spawn, the film's end), the player faces the way the game faced the hotdog: the room
+            // is turned so that the head looks along it.
+            if !stage.playing && let Some(faced) = stage.faced {
+                let turn = g.yaw - faced;
+                stage.turn += turn;
+                stage.faced = Some(g.yaw);
+                stage.aim = stage.aim.map(|(yaw, pitch)| (yaw + turn, pitch));
+            }
+            if let Some((yaw, pitch)) = stage.aim {
+                (g.yaw, g.pitch) = (yaw, pitch.clamp(-1.48, 1.48));
+            }
+        }
         // Checks only: a page with `?check` can aim the hotdog and hold its trigger (see forts::driven).
         let driven = crate::forts::driven();
         if let Some([yaw, pitch, _]) = driven {

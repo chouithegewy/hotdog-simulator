@@ -1306,6 +1306,10 @@ fn decide(
     if page.choice.is_empty() {
         page.choice = prefs.as_ref().and_then(|p| p.get(GRAPHICS_KEY)).unwrap_or_default();
     }
+    // A headset's phone chip draws every picture twice: it starts on the lowest level, until the menu says otherwise.
+    if cfg!(target_os = "android") && page.choice.is_empty() {
+        page.choice = Level::Lowest.key().into();
+    }
     let kind = format!("{:?}", adapter.device_type);
     let native = !cfg!(target_arch = "wasm32");
     let device = Device {

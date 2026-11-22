@@ -473,6 +473,36 @@ What it does not do, in Bevy 0.19.1:
 
 **Not together.** In Bevy 0.19.1 (and 0.20.1) the two cannot run at once. Raytraced lighting needs a deferred prepass, and meshlets fail on any camera with a prepass. With that bug fixed in a copy of Bevy, the meshlets still come out black under the traced light, and an entity carrying both a meshlet mesh and a traced mesh hangs. So `--ultra` runs the raytraced lighting and says why.
 
+## Virtual reality
+
+The `vr` cargo feature draws the game through OpenXR (`src/vr.rs`): for the Meta Quest 2 and later as an app of its own, and at a desk through any OpenXR runtime on Linux or Windows (SteamVR, Monado). It is the same game with the same modes, seen from the hotdog's eye at the hotdog's size: the player is a 13 cm frankfurter, and the kitchen is as big as that makes it.
+
+```sh
+tools/build-quest.sh install        # the Quest app (dist/hotdog-simulator-VERSION-quest.apk), onto the headset adb sees
+cargo run --release --features vr   # at a desk, with a headset's OpenXR runtime running
+```
+
+`tools/build-quest.sh` says at its top what it needs (the Android SDK and NDK, cargo-ndk, the `aarch64-linux-android` Rust target); the headset has to be in developer mode. Without an OpenXR runtime a `vr` build plays as the flat game.
+
+| Control (Quest Touch) | Does |
+| --- | --- |
+| Left stick | Walk, the way the head faces |
+| Right stick, left and right | Turn 30 degrees |
+| Right stick, up / down | Swap weapon / go prone |
+| Right trigger | Fire (throw, punch); on the screen in the air, click |
+| Left trigger | Aim (the scope; Kung Fu's heavy blow, the titan's smash) |
+| Right grip / left grip | Use / carry (block) |
+| A / B | Jump, and the next round / crouch |
+| X / Y | Ready / melee (kick, stomp) |
+| Left stick pressed / right stick pressed | Stim (dodge, charge) / hints |
+| Menu | The menu |
+
+- **The gun is in the right hand** and fires where the hand points (`src/vr/hands.rs`): a red dot floats on the line of fire. A hand the headset cannot see leaves the aim to the head. The controllers are read as the page's touch controls are (`src/touch.rs`), so every mode's buttons are the ones a phone has.
+- **The head-up display and the menus** are on a screen that floats in front of the player (`src/vr/screen.rs`). It follows the head; with the menu open it stays put, the right hand points at it (a yellow dot) and the trigger clicks.
+- **The view is the player's own.** The game turns the room only where it cuts the view (the film, the fridge between rounds, a death); the right stick turns it in steps, never smoothly.
+- **Graphics** start on the Lowest level on a headset (the menu changes it), and the flat picture is not drawn there (`HOTDOG_VR_MIRROR=1` or `0` says otherwise; at a desk the window shows it).
+- **Known limits**: the cards table of Fully Loaded, the replay viewer's controls and the lobby's look-around take a mouse the screen in the air does not yet give them; name tags and other marks drawn over the world are placed for the flat picture; a map other than the bundled one is not read from the app. The Quest app is not in `tools/build-all.sh`, in CI or in `THIRD_PARTY_LICENSES.html` (which lists what the other packages are made of): it is for trying on one's own headset until it is.
+
 ## Multiplayer
 
 One program serves everything, on one port: the page, both browser builds and the assets, the map editor, the game's WebSocket, each page's lobby WebSocket and the status. It is written in Rust on the game's own simulation (`crates/server`, binary `hotdog-server`; see [the server](#the-server)):

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-only
+  Copyright (C) 2026 David Nunes-Childs
+
+  The Meta Quest app (tools/build-quest.sh fills in @VERSION@ and @CODE@). No Java: Android's own NativeActivity loads
+  libquest.so (the game, src/main.rs), which finds the headset's OpenXR runtime through Khronos' loader
+  (libopenxr_loader.so, whose permissions and queries these are).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.chilos.hotdogsimulator"
+    android:versionCode="@CODE@"
+    android:versionName="@VERSION@">
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="32" />
+
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+    <uses-feature android:glEsVersion="0x00030001" android:required="true" />
+    <!-- Multiplayer (the game's server). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="Hotdog Simulator"
+        android:hasCode="false"
+        android:usesCleartextTraffic="true">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
+        <meta-data android:name="com.oculus.intent.category.VR" android:value="vr_only" />
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode">
+            <meta-data android:name="android.app.lib_name" android:value="quest" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

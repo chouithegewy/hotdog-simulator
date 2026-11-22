@@ -18,6 +18,9 @@ webgpu = ["bevy/webgpu", "bevy/pbr_anisotropy_texture"]
 # (bevy_solari) and virtual geometry (meshlets), switched on at run time by --ultra, --raytraced or --meshlets.
 # Native only: never part of a browser build. `wgpu` is Bevy's own (the same version), to check the GPU first.
 ultra = ["bevy/bevy_solari", "bevy/meshlet", "bevy/meshlet_processor", "dep:wgpu"]
+# Virtual reality (src/vr.rs): the game through OpenXR, for the Meta Quest (tools/build-quest.sh) and, to try it at a
+# desk, any OpenXR runtime on Linux or Windows. Native only.
+vr = ["dep:bevy_mod_openxr", "dep:bevy_mod_xr", "dep:openxr"]
 
 [dependencies]
 bevy = { version = "0.19.1", default-features = false, features = ["3d", "ui", "bevy_winit", "default_font", "webgl2", "x11", "bevy_audio", "wav"] }
@@ -25,6 +28,9 @@ wasm-bindgen = "=0.2.128"
 kitchen-sim = { path = "crates/kitchen-sim" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bevy_mod_openxr = { version = "0.6", optional = true }
+bevy_mod_xr = { version = "0.6", optional = true }
+openxr = { version = "0.21", optional = true }
 
 # The browser builds load the food textures as WebP (src/hotdog.rs).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -39,10 +45,22 @@ tungstenite = "0.30"
 # Only with the `ultra` feature: Bevy's wgpu, to ask the GPU what it can do before the renderer starts.
 wgpu = { version = "29.0.4", default-features = false, optional = true }
 
+# The Meta Quest (tools/build-quest.sh): the activity is the game.
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["android-native-activity"] }
+
 # wgpu-hal with one change (vendor/wgpu-hal/Cargo.toml says which): its WebGL 2 queue skips texture, sampler and
 # vertex-attribute calls that set what is already set, over half of a frame's GL calls in the browser.
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal" }
+
+# The Meta Quest's app is this shared library, loaded by Android's NativeActivity (tools/build-quest.sh). An example
+# so that nothing else builds it: `cargo build`, `cargo test` and the packages leave it alone without the feature.
+[[example]]
+name = "quest"
+path = "src/main.rs"
+crate-type = ["cdylib"]
+required-features = ["vr"]
 
 [profile.release]
 opt-level = 3
