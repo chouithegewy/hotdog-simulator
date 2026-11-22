@@ -23,6 +23,7 @@ use crate::maya::HotdogCamera;
 
 pub mod hands;
 pub mod screen;
+mod timing;
 
 /// How many of the game's units a metre of the room is: the hotdog's eye (0.135) is a standing person's (1.6 m).
 pub const SCALE: f32 = kitchen_sim::feast::EYE / 1.6;
@@ -36,6 +37,43 @@ const RETICLE: f32 = 1.;
 struct Reticle;
 /// The eyes' near plane, in metres of the room (2 mm of the kitchen at [`SCALE`]).
 const NEAR: f32 = 0.025;
+
+/// Checks only: switches for measuring on a headset, `name=value` pairs with `;` or a new line between them, in
+/// the file `HOTDOG_VR_KNOBS` names or, on Android, in the system property `debug.hotdog.vr`
+/// (`adb shell setprop debug.hotdog.vr "intro=0;timing=1"`, then start the app again). `eye=1008x1108` asks for
+/// eyes of that size, `screen=0` leaves the screen in the air out, `world=0` shows the eyes nothing of the world,
+/// `intro=0` skips the film (runtime.rs), `mirror=1` draws the flat picture as well, `timing=1` logs where a
+/// frame's time goes (timing.rs); `bisect` has more.
+pub fn knob(name: &str) -> Option<String> {
+    static KNOBS: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    let knobs = KNOBS.get_or_init(|| {
+        let text = std::env::var_os("HOTDOG_VR_KNOBS").and_then(|file| std::fs::read_to_string(file).ok()).unwrap_or_default();
+        #[cfg(target_os = "android")]
+        let text = text + ";" + &property("debug.hotdog.vr");
+        let knobs: Vec<(String, String)> = text.split([';', '\n']).filter_map(|pair| pair.trim().split_once('=')).map(|(name, value)| (name.trim().to_string(), value.trim().to_string())).collect();
+        if !knobs.is_empty() {
+            info!("VR: checks' switches {knobs:?}");
+        }
+        knobs
+    });
+    knobs.iter().find(|(known, _)| known == name).map(|(_, value)| value.clone())
+}
+/// An Android system property (empty when it is not set).
+#[cfg(target_os = "android")]
+fn property(name: &str) -> String {
+    unsafe extern "C" {
+        fn __system_property_get(name: *const std::ffi::c_char, value: *mut std::ffi::c_char) -> std::ffi::c_int;
+    }
+    let Ok(name) = std::ffi::CString::new(name) else {
+        return String::new();
+    };
+    // (PROP_VALUE_MAX is 92.)
+    let mut value = [0 as std::ffi::c_char; 128];
+    // SAFETY: `name` ends in a nul, and `value` is longer than any property's value.
+    let length = unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+    let bytes: Vec<u8> = value[..length.clamp(0, 127) as usize].iter().map(|c| *c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 
 /// The game's plugins, drawn through OpenXR.
 pub fn plugins(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGroupBuilder {
@@ -74,7 +112,15 @@ pub struct Stage {
 pub struct Plugin;
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Stage>().add_systems(Update, unmirror.run_if(bevy_mod_openxr::openxr_session_running)).add_systems(Startup, aim_dot.run_if(bevy_mod_xr::session::session_available)).add_plugins((hands::Plugin, screen::Plugin)).add_systems(Update, (dress, shoot)).add_systems(
+        let eye = knob("eye").and_then(|eye| eye.split_once('x').and_then(|(w, h)| Some(UVec2::new(w.parse().ok()?, h.parse().ok()?)))).or_else(|| headset().then_some(EYE));
+        if let Some(eye) = eye {
+            app.insert_resource(bevy_mod_openxr::resources::OxrSessionConfig { resolutions: Some(vec![eye]), ..default() });
+        }
+        // A headset is never out of focus as a window is: every frame is drawn as soon as the runtime wants it (the
+        // defaults pace a phone's app, and a window nobody sees counts as unfocused).
+        app.insert_resource(bevy::winit::WinitSettings::continuous());
+        app.add_systems(Last, (bisect, list, plain, strip));
+        app.init_resource::<Stage>().add_systems(Update, unmirror.run_if(bevy_mod_openxr::openxr_session_running)).add_systems(Startup, aim_dot.run_if(bevy_mod_xr::session::session_available)).add_plugins((hands::Plugin, screen::Plugin, timing::Plugin)).add_systems(Update, (dress, shoot)).add_systems(
             PostUpdate,
             follow
                 .after(bevy::transform::TransformSystems::Propagate)
@@ -89,7 +135,7 @@ impl bevy::app::Plugin for Plugin {
 /// headset, which has no window to see and no frames to spare (`HOTDOG_VR_MIRROR=0` or `1` says otherwise).
 fn mirrored() -> bool {
     static MIRROR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MIRROR.get_or_init(|| std::env::var("HOTDOG_VR_MIRROR").map_or(!cfg!(target_os = "android"), |v| v != "0"))
+    *MIRROR.get_or_init(|| std::env::var("HOTDOG_VR_MIRROR").ok().or_else(|| knob("mirror")).map_or(!cfg!(target_os = "android"), |v| v != "0"))
 }
 /// Without the mirror the game's own cameras (the world's and the view model's) draw to nothing. They stay, and
 /// stay active: the game moves them, and the eyes follow.
@@ -98,8 +144,189 @@ fn unmirror(mut cameras: Query<&mut bevy::camera::RenderTarget, (With<Camera3d>,
         return;
     }
     for mut target in &mut cameras {
-        if !matches!(*target, bevy::camera::RenderTarget::None { .. }) {
-            *target = bevy::camera::RenderTarget::None { size: UVec2::new(1280, 720) };
+        let size = if knob("flat").as_deref() == Some("tiny") { UVec2::new(16, 9) } else { UVec2::new(1280, 720) };
+        if !matches!(*target, bevy::camera::RenderTarget::None { size: now } if now == size) {
+            *target = bevy::camera::RenderTarget::None { size };
+        }
+    }
+}
+
+/// Checks only (`knob`): `flat=0` switches the game's own cameras off, `shadows=0` every lamp's shadow map,
+/// `ui=0` the screen's camera, `eyes=0` the eyes themselves.
+fn bisect(
+    mut hidden: Query<(Has<DirectionalLight>, &mut Visibility), Or<(With<DirectionalLight>, With<PointLight>, With<SpotLight>)>>,
+    mut commands: Commands,
+    eyes: Query<Entity, With<XrCamera>>,
+    mut cameras: Query<(&mut Camera, Has<XrCamera>, Has<Camera3d>)>,
+    mut points: Query<&mut PointLight>,
+    mut spots: Query<&mut SpotLight>,
+    mut suns: Query<&mut DirectionalLight>,
+) {
+    let off = |name: &str| knob(name).as_deref() == Some("0");
+    for (mut camera, eye, world) in &mut cameras {
+        let unwanted = if eye { off("eyes") } else if world { off("flat") } else { off("ui") };
+        if unwanted && camera.is_active {
+            camera.is_active = false;
+        }
+    }
+    if off("lights") {
+        for mut light in &mut points {
+            if light.intensity != 0. {
+                light.intensity = 0.;
+                light.range = 0.001;
+            }
+        }
+        for mut light in &mut spots {
+            if light.intensity != 0. {
+                light.intensity = 0.;
+                light.range = 0.001;
+            }
+        }
+    }
+    if off("post") {
+        use bevy::anti_alias::{contrast_adaptive_sharpening::ContrastAdaptiveSharpening, fxaa::Fxaa};
+        for eye in &eyes {
+            commands.entity(eye).remove::<(Fxaa, ContrastAdaptiveSharpening, bevy::post_process::bloom::Bloom, bevy::pbr::DistanceFog, bevy::render::view::ColorGrading)>().insert((Tonemapping::None, bevy::core_pipeline::tonemapping::DebandDither::Disabled));
+        }
+    }
+    // `lamps=gone`, `sun=gone`: the lights are hidden outright, so no fragment sees them at all.
+    for (wanted, mut seen) in &mut hidden {
+        let gone = match wanted {
+            true => knob("sun").as_deref() == Some("gone"),
+            false => knob("lamps").as_deref() == Some("gone"),
+        };
+        if gone && *seen != Visibility::Hidden {
+            *seen = Visibility::Hidden;
+        }
+    }
+    if off("shadows") {
+        for mut light in &mut points {
+            if light.shadow_maps_enabled {
+                light.shadow_maps_enabled = false;
+            }
+        }
+        for mut light in &mut spots {
+            if light.shadow_maps_enabled {
+                light.shadow_maps_enabled = false;
+            }
+        }
+        for mut light in &mut suns {
+            if light.shadow_maps_enabled {
+                light.shadow_maps_enabled = false;
+            }
+        }
+    }
+}
+
+/// Checks only (`knob`, `eyes=list`): logs once, ten seconds in, what an eye carries.
+fn list(world: &mut World, mut done: Local<bool>) {
+    if *done || knob("eyes").as_deref() != Some("list") || world.resource::<Time<Real>>().elapsed_secs() < 10. {
+        return;
+    }
+    let Some(eye) = world.query_filtered::<Entity, With<XrCamera>>().iter(world).next() else {
+        return;
+    };
+    *done = true;
+    if let Ok(parts) = world.inspect_entity(eye) {
+        let names: Vec<String> = parts.map(|part| part.name().to_string().rsplit("::").next().unwrap_or_default().to_string()).collect();
+        info!("VR eye: {}", names.join(" "));
+    }
+    let msaa = world.get::<Msaa>(eye).copied();
+    info!("VR eye: {msaa:?}");
+}
+
+/// Whether the picture is drawn for a headset's own chip (a Quest's: a phone's GPU that draws every picture twice,
+/// 72 times a second): always on Android, and at a desk with the switch `headset=1`; `lit=1` keeps the lighting.
+///
+/// Measured on a Quest 2 in a round, eyes of 1440 by 1584 (frame times; the headset wants 13.9 ms): as the Lowest
+/// level draws it 80 ms; without the screen in the air 60; with the sun's and the lamps' light gone as well 30;
+/// unlit 22; unlit and nothing done to the finished picture 15. The lit path costs the same whatever lights there
+/// are, so the headset draws unlit ([`plain`]), finishes nothing ([`strip`]), and draws smaller eyes ([`EYE`]).
+pub fn headset() -> bool {
+    static HEADSET: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HEADSET.get_or_init(|| knob("headset").map_or(cfg!(target_os = "android"), |v| v != "0"))
+}
+/// A headset's eyes, in pixels: three quarters each way of what a Quest 2 asks for (`eye=WxH` asks for another).
+const EYE: UVec2 = UVec2::new(1080, 1188);
+
+/// A headset's materials are unlit: their colour and their texture, as they are. Every frame, for the materials
+/// made or changed since (the players' own, which bend, and the titan's as well).
+fn plain(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bent: Option<ResMut<Assets<crate::player_model::bend::BentMaterial>>>,
+    mut titans: Option<ResMut<Assets<crate::titan::rig::TitanMaterial>>>,
+) {
+    if !headset() || knob("lit").as_deref() == Some("1") {
+        return;
+    }
+    let lit: Vec<_> = materials.iter().filter(|(_, m)| !m.unlit).map(|(id, _)| id).collect();
+    if !lit.is_empty() && knob("timing").is_some() {
+        info!("VR plain: {} of {} materials were lit", lit.len(), materials.len());
+    }
+    for id in lit {
+        if let Some(mut m) = materials.get_mut(id) {
+            m.unlit = true;
+        }
+    }
+    if let Some(bent) = bent.as_mut() {
+        let lit: Vec<_> = bent.iter().filter(|(_, m)| !m.base.unlit).map(|(id, _)| id).collect();
+        for id in lit {
+            if let Some(mut m) = bent.get_mut(id) {
+                m.base.unlit = true;
+            }
+        }
+    }
+    if let Some(titans) = titans.as_mut() {
+        let lit: Vec<_> = titans.iter().filter(|(_, m)| !m.base.unlit).map(|(id, _)| id).collect();
+        for id in lit {
+            if let Some(mut m) = titans.get_mut(id) {
+                m.base.unlit = true;
+            }
+        }
+    }
+}
+
+/// A headset's eyes finish nothing: no anti-aliasing pass, no sharpening, no bloom, no grading, no fog, and no
+/// lamp casts a shadow nobody is lit by. Every frame: visuals.rs dresses every camera again when the theme changes.
+fn strip(
+    mut commands: Commands,
+    eyes: Query<(Entity, Has<bevy::anti_alias::fxaa::Fxaa>, Has<bevy::post_process::bloom::Bloom>, Has<bevy::pbr::DistanceFog>, Has<bevy::render::view::ColorGrading>), With<XrCamera>>,
+    mut tones: Query<(&mut Tonemapping, &mut bevy::core_pipeline::tonemapping::DebandDither), With<XrCamera>>,
+    mut points: Query<&mut PointLight>,
+    mut spots: Query<&mut SpotLight>,
+    mut suns: Query<&mut DirectionalLight>,
+) {
+    if !headset() || knob("lit").as_deref() == Some("1") {
+        return;
+    }
+    use bevy::anti_alias::{contrast_adaptive_sharpening::ContrastAdaptiveSharpening, fxaa::Fxaa};
+    for (eye, fxaa, bloom, fog, grading) in &eyes {
+        if fxaa || bloom || fog || grading {
+            commands.entity(eye).remove::<(Fxaa, ContrastAdaptiveSharpening, bevy::post_process::bloom::Bloom, bevy::pbr::DistanceFog, bevy::render::view::ColorGrading)>();
+        }
+    }
+    // (Unlit colours are the picture's own: nothing to map down from a brighter range, nothing to dither.)
+    for (mut mapped, mut dither) in &mut tones {
+        if *mapped != Tonemapping::None {
+            *mapped = Tonemapping::None;
+        }
+        if *dither != bevy::core_pipeline::tonemapping::DebandDither::Disabled {
+            *dither = bevy::core_pipeline::tonemapping::DebandDither::Disabled;
+        }
+    }
+    for mut light in &mut points {
+        if light.shadow_maps_enabled {
+            light.shadow_maps_enabled = false;
+        }
+    }
+    for mut light in &mut spots {
+        if light.shadow_maps_enabled {
+            light.shadow_maps_enabled = false;
+        }
+    }
+    for mut light in &mut suns {
+        if light.shadow_maps_enabled {
+            light.shadow_maps_enabled = false;
         }
     }
 }
@@ -150,7 +377,8 @@ fn dress(
         if exposed.ev100 != exposure.ev100 {
             exposed.ev100 = exposure.ev100;
         }
-        if *mapped != *tonemapping {
+        let unlit = headset() && knob("lit").as_deref() != Some("1");
+        if !unlit && *mapped != *tonemapping {
             *mapped = *tonemapping;
         }
     }
@@ -176,7 +404,7 @@ fn follow(
     let (Some((game, camera)), Ok((mut local, mut global))) = (game.iter().next(), root.single_mut()) else {
         return;
     };
-    let Some((at, ..)) = head(&views) else {
+    let Some((at, facing, _)) = head(&views) else {
         return;
     };
     // The head's origin is where it was found, and follows a head that has walked away from it (0.75 m).
@@ -194,8 +422,8 @@ fn follow(
     stage.last = Some((camera.translation(), played));
     let forward = camera.rotation() * Vec3::NEG_Z;
     if cut && !played && forward.with_y(0.).length() > 1e-3 {
-        // (Facing the room's front is looking the way the camera looks.)
-        stage.turn = (-forward.x).atan2(-forward.z);
+        // (The way the head faces now, wherever in the room that is, is the way the camera looks.)
+        stage.turn = (-forward.x).atan2(-forward.z) - facing;
     }
     let rotation = Quat::from_rotation_y(stage.turn);
     let placed = Transform { translation: camera.translation() - rotation * (origin * SCALE), rotation, scale: Vec3::splat(SCALE) };

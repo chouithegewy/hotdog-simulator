@@ -266,6 +266,10 @@ fn situation(world: &World) -> Situation {
 }
 
 fn set_grab(world: &mut World, grab: bool) {
+    // (A headset has no pointer to hold, and Android says so every time it is asked.)
+    if cfg!(target_os = "android") {
+        return;
+    }
     for mut cursor in world.query::<&mut CursorOptions>().iter_mut(world) {
         cursor.grab_mode = if grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
         cursor.visible = !grab;

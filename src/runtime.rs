@@ -71,7 +71,7 @@ impl Options {
             let demo = args.iter().any(|s| s == "--demo");
             Self {
                 // Multiplayer starts in the lobby, never with the breakfast scene.
-                skip_intro: demo || args.iter().any(|s| s == "--skip-intro") || args.iter().any(|s| s == "--connect"),
+                skip_intro: demo || args.iter().any(|s| s == "--skip-intro") || args.iter().any(|s| s == "--connect") || vr_knob("intro").as_deref() == Some("0"),
                 profile: args.iter().any(|s| s == "--profile"),
                 profile_path: value("--profile"),
                 connect: value("--connect"),
@@ -165,6 +165,17 @@ pub fn android() {
         // SAFETY: the first thing `main` does, before any other thread is started.
         unsafe { std::env::set_var("HOME", &home) };
         let _ = std::env::set_current_dir(&home);
+    }
+}
+
+/// A check's switch of the virtual reality build (vr.rs, `knob`); none in any other.
+fn vr_knob(name: &str) -> Option<String> {
+    #[cfg(feature = "vr")]
+    return crate::vr::knob(name);
+    #[cfg(not(feature = "vr"))]
+    {
+        let _ = name;
+        None
     }
 }
 

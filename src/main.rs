@@ -89,6 +89,10 @@ fn main() {
     } else {
         bevy::window::PresentMode::AutoVsync
     };
+    // Virtual reality: the headset's runtime paces the frames, and the window (which on a headset nobody sees, and
+    // at a desk only mirrors) must not hold them to a screen's.
+    #[cfg(feature = "vr")]
+    let present_mode = bevy::window::PresentMode::AutoNoVsync;
     let mut app = App::new();
     app.insert_resource(lobby::Lobby::new(&options))
         .insert_resource(options)

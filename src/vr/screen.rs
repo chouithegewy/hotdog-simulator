@@ -29,6 +29,8 @@ pub const LAYER: usize = 30;
 /// The panel, in metres of the room: how wide, and how far from the head.
 const WIDTH: f32 = 1.7;
 const AWAY: f32 = 1.5;
+/// The most pixels the picture is tall.
+const TALL: f32 = 720.;
 /// How fast the panel catches the head up (a second to the power of minus one), and how far the head turns from a
 /// panel that is standing still (the menu's) before it comes back in front.
 const EASE: f32 = 9.;
@@ -77,7 +79,11 @@ fn build(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
     let Ok(root) = root.single() else {
         return;
     };
-    let size = UVec2::new(1280, 720);
+    if super::knob("screen").as_deref() == Some("0") {
+        return;
+    }
+    // (Not yet any window's size: `fit` makes the picture that is shown.)
+    let size = UVec2::new(16, 9);
     let image = images.add(Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None));
     let camera = commands
         .spawn((
@@ -87,6 +93,9 @@ fn build(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
             RenderTarget::Image(ImageRenderTarget { handle: image.clone(), scale_factor: 1. }),
             IsDefaultUiCamera,
             Msaa::Off,
+            // (The interface's colours are the picture's own.)
+            bevy::core_pipeline::tonemapping::Tonemapping::None,
+            bevy::core_pipeline::tonemapping::DebandDither::Disabled,
             // (Nothing of the world is on its layer: the interface alone.)
             RenderLayers::layer(LAYER + 1),
         ))
@@ -117,19 +126,23 @@ fn build(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
     commands.insert_resource(Screen { image, camera, material, panel, dot, size, way: None });
 }
 
-/// The picture is the size of the window, which is what the interface is laid out for (hud.rs, menu.rs). A picture
-/// of another size is a new image: the camera draws to it and the panel shows it.
+/// The picture is laid out for the window's size, which is what the interface is made for (hud.rs, menu.rs), and
+/// drawn no taller than [`TALL`] pixels: a taller one is drawn at a fraction of its size (the target's scale factor).
+/// A picture of another size is a new image: the camera draws to it and the panel shows it.
 fn fit(screen: Option<ResMut<Screen>>, windows: Query<&Window>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<StandardMaterial>>, mut targets: Query<&mut RenderTarget>) {
     let (Some(mut screen), Some(window)) = (screen, windows.iter().next()) else {
         return;
     };
-    let size = UVec2::new(window.width().round() as u32, window.height().round() as u32).clamp(UVec2::new(640, 360), UVec2::new(2560, 1600));
+    let laid = Vec2::new(window.width(), window.height()).max(Vec2::new(320., 180.));
+    let scale = (TALL / laid.y).min(1.);
+    let size = (laid * scale).round().as_uvec2().max(UVec2::ONE);
     if size == screen.size {
         return;
     }
+    info!("VR screen: the window is {} by {}; the picture {} by {}", laid.x, laid.y, size.x, size.y);
     let image = images.add(Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None));
     if let Ok(mut target) = targets.get_mut(screen.camera) {
-        *target = RenderTarget::Image(ImageRenderTarget { handle: image.clone(), scale_factor: 1. });
+        *target = RenderTarget::Image(ImageRenderTarget { handle: image.clone(), scale_factor: scale });
     }
     if let Some(mut material) = materials.get_mut(&screen.material) {
         material.base_color_texture = Some(image.clone());
@@ -140,7 +153,8 @@ fn fit(screen: Option<ResMut<Screen>>, windows: Query<&Window>, mut images: ResM
 /// The eyes see the world and the screen's layer, and while the player has the view the first-person weapon and
 /// hands (viewmodel.rs, which draws them for the flat game with a camera of their own).
 fn see(mut commands: Commands, stage: Res<super::Stage>, eyes: Query<(Entity, Option<&RenderLayers>), With<XrCamera>>) {
-    let wanted = if stage.playing { RenderLayers::from_layers(&[0, crate::viewmodel::VIEW_LAYER, LAYER]) } else { RenderLayers::from_layers(&[0, LAYER]) };
+    let world = if super::knob("world").as_deref() == Some("0") { 29 } else { 0 };
+    let wanted = if stage.playing { RenderLayers::from_layers(&[world, crate::viewmodel::VIEW_LAYER, LAYER]) } else { RenderLayers::from_layers(&[world, LAYER]) };
     for (eye, layers) in &eyes {
         if layers != Some(&wanted) {
             commands.entity(eye).insert(wanted.clone());
