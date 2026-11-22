@@ -59,7 +59,7 @@ Multiplayer in a browser adds two keys: Enter opens the text chat (Enter sends, 
 
 ### Gamepad
 
-A gamepad the system knows (an Xbox controller by cable or Bluetooth) plays the game natively and in a browser's native build (`src/gamepad.rs`): left stick walks, right stick looks, the triggers fire and aim, the bumpers use and carry, A jumps, B crouches, X is ready, Y swaps, the sticks pressed are stim and melee, the D-pad is hints, prone, primary and secondary, and Start opens the menu (which the mouse works). SETTINGS has CONTROLLER: AUTO plays with whatever is touched, KEYBOARD + MOUSE never listens to a pad, GAMEPAD always does. A phone's touch controls and a headset's controllers come with the device.
+A gamepad the system knows (an Xbox controller by cable or Bluetooth) plays the native game (`src/gamepad.rs`; in a browser it is compiled in but has not been tried): left stick walks, right stick looks, the triggers fire and aim, the bumpers use and carry, A jumps, B crouches, X is ready, Y swaps, the sticks pressed are stim and melee, the D-pad is hints, prone, primary and secondary, and Start opens the menu (which the mouse works). SETTINGS has CONTROLLER: AUTO plays with whatever is touched, KEYBOARD + MOUSE never listens to a pad, GAMEPAD always does. A phone's touch controls and a headset's controllers come with the device.
 
 ### Touch
 
