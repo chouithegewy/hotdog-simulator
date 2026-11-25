@@ -19,6 +19,9 @@ accepted = [
     "CC0-1.0",
     "MIT-0",
     "0BSD",
+    # webpki-roots: Mozilla's list of root certificates, as data (the native client's TLS, src/network.rs). Permissive:
+    # it may be shared and changed, with the licence's text passed on.
+    "CDLA-Permissive-2.0",
     # The project's own crates (hotdog-simulator, kitchen-sim, hotdog-server, hotdog-launcher, kitchen-ffi) are in the
     # dependency graph and are GPL-3.0-only. tools/licenses/render.py leaves them out of the bundle, and refuses a
     # GPL-3.0-only crate that is not one of them.

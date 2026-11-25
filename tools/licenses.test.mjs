@@ -136,7 +136,7 @@ test('render.py refuses a licence that about.toml does not accept, and a third p
 
 test('about.toml accepts only permissive licences (and GPL-3.0-only, for the project\'s own crates)', () => {
   const accepted = [...read('about.toml').match(/accepted = \[([^\]]*)\]/)[1].matchAll(/^\s*"([^"]+)"/gm)].map(m => m[1]);
-  const permissive = new Set(['MIT', 'Apache-2.0', 'Apache-2.0 WITH LLVM-exception', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', 'Zlib', 'BSL-1.0', 'Unicode-3.0', 'Unlicense', 'CC0-1.0', 'MIT-0', '0BSD', 'GPL-3.0-only']);
+  const permissive = new Set(['MIT', 'Apache-2.0', 'Apache-2.0 WITH LLVM-exception', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', 'Zlib', 'BSL-1.0', 'Unicode-3.0', 'Unlicense', 'CC0-1.0', 'MIT-0', '0BSD', 'CDLA-Permissive-2.0', 'GPL-3.0-only']);
   for (const id of accepted) assert.ok(permissive.has(id), `${id} is not on the list of licences known to be compatible with GPL-3.0-only: read it, then add it here`);
   assert.ok(accepted.includes('MIT') && accepted.includes('Apache-2.0'));
 });
